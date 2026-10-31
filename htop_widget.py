@@ -25,7 +25,8 @@ from datetime import datetime
 import psutil
 from PyQt5.QtCore import QDir, QLockFile, QPointF, QPropertyAnimation, QRectF, Qt, QTimer
 from PyQt5.QtGui import QBrush, QColor, QFont, QIcon, QImage, QLinearGradient, QRadialGradient, QPainter, QPainterPath, QPen, QPixmap
-from PyQt5.QtWidgets import QAction, QActionGroup, QApplication, QInputDialog, QMenu, QSystemTrayIcon, QWidget
+from PyQt5.QtWidgets import (QAction, QActionGroup, QApplication, QGridLayout, QInputDialog, QMenu, QSizePolicy,
+                             QSystemTrayIcon, QTabWidget, QVBoxLayout, QWidget)
 
 CONFIG = os.path.expanduser("~/.config/desktop_htop.json")
 HISTORY = 60          # jumlah sampel grafik
@@ -165,6 +166,69 @@ I18N = {
     "age.h": ("{n} jam", "{n} h"),
     "bat.charging": ("mengisi daya", "charging"),
     "bat.discharging": ("memakai baterai", "discharging"),
+    "menu.dashboard": ("Buka Dashboard", "Open dashboard"),
+    "dash.title": ("Dashboard", "Dashboard"),
+    "tab.overview": ("Ringkasan", "Overview"),
+    "tab.memory": ("Memori", "Memory"),
+    "tab.network": ("Jaringan", "Network"),
+    "tab.battery": ("Baterai", "Battery"),
+    "tab.system": ("Sistem", "System"),
+    "smart.written": ("Ditulis", "Written"),
+    "smart.read": ("Dibaca", "Read"),
+    "smart.cycles": ("Siklus daya", "Power cycles"),
+    "smart.unsafe": ("Mati paksa", "Unsafe shutdowns"),
+    "d.cpu": ("Penggunaan CPU (rata-rata)", "CPU usage (average)"),
+    "d.cpu_now": ("CPU sekarang", "CPU now"),
+    "d.memory": ("Memori", "Memory"),
+    "d.disk": ("Penyimpanan", "Storage"),
+    "d.cores": ("Per core", "Per core"),
+    "d.network": ("Jaringan (↓ unduh · ↑ unggah)", "Network (↓ down · ↑ up)"),
+    "d.services": ("Status layanan", "Service status"),
+    "d.temps": ("Suhu sensor", "Sensor temperatures"),
+    "d.health": ("Kesehatan", "Health"),
+    "d.docker": ("Container Docker", "Docker containers"),
+    "d.used": ("Terpakai", "Used"),
+    "d.cache": ("Cache & buffer", "Cache & buffers"),
+    "d.free": ("Bebas", "Free"),
+    "d.freq": ("Frekuensi", "Frequency"),
+    "d.cores_n": ("Jumlah core", "Cores"),
+    "d.load": ("Beban rata-rata", "Load average"),
+    "d.info": ("Informasi", "Information"),
+    "d.total": ("Total", "Total"),
+    "d.available": ("Tersedia", "Available"),
+    "d.swap": ("Swap", "Swap"),
+    "d.topmem": ("Proses terbesar (memori)", "Top processes (memory)"),
+    "d.iface": ("Interface", "Interface"),
+    "d.recv": ("Diterima", "Received"),
+    "d.sent": ("Terkirim", "Sent"),
+    "d.speed": ("Kecepatan link", "Link speed"),
+    "d.traffic": ("Total lalu lintas", "Total traffic"),
+    "d.latency": ("Latensi (ms)", "Latency (ms)"),
+    "d.wifi": ("Sinyal WiFi", "WiFi signal"),
+    "d.life": ("Sisa umur", "Life left"),
+    "d.written_read": ("Ditulis vs dibaca", "Written vs read"),
+    "d.io": ("I/O disk (baca/tulis)", "Disk I/O (read/write)"),
+    "d.partitions": ("Partisi", "Partitions"),
+    "d.lost": ("Hilang", "Lost"),
+    "d.cap_health": ("Kapasitas baterai (penuh vs desain)", "Battery capacity (full vs design)"),
+    "d.os": ("Distro", "Distribution"),
+    "d.kernel": ("Kernel", "Kernel"),
+    "d.host": ("Hostname", "Hostname"),
+    "d.status": ("Status", "Status"),
+    "d.port": ("Port", "Port"),
+    "d.version": ("Versi", "Version"),
+    "d.procs": ("Proses", "Processes"),
+    "d.rules": ("Aturan", "Rules"),
+    "d.uptime": ("Ketersediaan", "Uptime"),
+    "d.samples": ("{n} sampel", "{n} samples"),
+    "d.policy": ("Kebijakan bawaan", "Default policy"),
+    "d.policy_in": ("Masuk", "Incoming"),
+    "d.policy_out": ("Keluar", "Outgoing"),
+    "d.avail_hist": ("Riwayat ketersediaan", "Availability history"),
+    "d.containers_list": ("Daftar container", "Containers"),
+    "d.images": ("Ukuran image", "Image sizes"),
+    "d.img_use": ("Image dipakai", "Images in use"),
+    "d.img_idle": ("Tidak dipakai", "Unused"),
     "legend.ok": ("Bagus", "Good"),
     "legend.warn": ("Hati-hati", "Caution"),
     "legend.crit": ("Tinggi", "High"),
@@ -808,6 +872,11 @@ class Widget(QWidget):
         self.smart.start()
         self.nvme_parts = []
         self.nvme_io = None          # (read B/s, write B/s, busy %)
+        self.nvme_r = deque([0] * HISTORY, maxlen=HISTORY)
+        self.nvme_w = deque([0] * HISTORY, maxlen=HISTORY)
+        self.svc_hist = {}           # nama layanan -> deque[(hidup, ms)] untuk dashboard
+        self._poll_seen = None
+        self.dashboard = None
         self._io_prev = None
         self.iface, self.is_wifi = pick_iface()
         self.net_down = deque([0] * HISTORY, maxlen=HISTORY)
@@ -858,6 +927,13 @@ class Widget(QWidget):
         if reason in (QSystemTrayIcon.Trigger, QSystemTrayIcon.DoubleClick):
             self.toggle_visible()
 
+    def open_dashboard(self):
+        if self.dashboard is None:
+            self.dashboard = Dashboard(self)
+        self.dashboard.show()
+        self.dashboard.raise_()
+        self.dashboard.activateWindow()
+
     def toggle_visible(self):
         self.setVisible(not self.isVisible())
 
@@ -865,6 +941,7 @@ class Widget(QWidget):
         m = QMenu(parent)
         m.addAction(APP_NAME).setEnabled(False)
         m.addSeparator()
+        m.addAction(tr("menu.dashboard")).triggered.connect(self.open_dashboard)
         m.addAction(tr("menu.toggle")).triggered.connect(self.toggle_visible)
         lock = QAction(tr("menu.lock"), m, checkable=True, checked=self.locked)
         lock.toggled.connect(self.set_locked)
@@ -945,10 +1022,22 @@ class Widget(QWidget):
         self.battery = read_battery()
         self.read_nvme_usage()
         self.read_net()
+        self.record_history()
         avg = sum(self.cpu_now) / len(self.cpu_now)
         if hasattr(self, "tray"):
             self.tray.setToolTip(f"{APP_NAME}\nCPU {avg:.0f}%  ·  RAM {self.mem.percent:.0f}%")
         self.update()
+
+    def record_history(self):
+        """Simpan riwayat status/latensi layanan tiap kali poller selesai satu putaran."""
+        data = self.poller.data
+        if data is self._poll_seen:
+            return
+        self._poll_seen = data
+        for name in [n for n, _, _, _ in SERVICES] + ["Internet"]:
+            info = data.get(name)
+            if info is not None and not info.get("absent"):
+                self.svc_hist.setdefault(name, deque(maxlen=HISTORY)).append((bool(info["up"]), info.get("ms") or 0))
 
     def read_net(self):
         self.iface, self.is_wifi = pick_iface()
@@ -991,6 +1080,8 @@ class Widget(QWidget):
             dt = max(now - t0, 1e-3)
             busy = min(100.0, (c.busy_time - b0) / (dt * 10)) if hasattr(c, "busy_time") else 0.0
             self.nvme_io = ((c.read_bytes - r0) / dt, (c.write_bytes - w0) / dt, busy)
+            self.nvme_r.append(self.nvme_io[0])
+            self.nvme_w.append(self.nvme_io[1])
         self._io_prev = (now, c.read_bytes, c.write_bytes, getattr(c, "busy_time", 0))
 
     def read_sensors(self):
@@ -1597,6 +1688,8 @@ class Widget(QWidget):
         self.theme = name
         apply_theme(name)
         self.sensors = self.read_sensors()   # warna status ikut tema
+        if self.dashboard:
+            self.dashboard.apply_style()
         self.persist()
         self.update()
 
@@ -1616,6 +1709,781 @@ class Widget(QWidget):
         self.opacity_bg = v
         self.persist()
         self.update()
+
+
+# ---------- dashboard ----------
+def fmt_size(n):
+    return fmt_tb(n) if n >= 1e12 else fmt_bytes(n)
+
+
+def fmt_dur(secs):
+    d, rem = divmod(int(secs), 86400)
+    h, m = divmod(rem // 60, 60)
+    if d:
+        return f"{tr('age.d', n=d)} {tr('age.h', n=h)}"
+    return f"{tr('age.h', n=h)} {m} min" if h else f"{m} min"
+
+
+def top_memory(n=8):
+    """Proses dengan RSS terbesar, digabung per nama."""
+    agg = {}
+    for pr in psutil.process_iter(["name", "memory_info"]):
+        try:
+            agg[pr.info["name"]] = agg.get(pr.info["name"], 0) + pr.info["memory_info"].rss
+        except (psutil.Error, TypeError, AttributeError):
+            pass
+    return sorted(agg.items(), key=lambda kv: -kv[1])[:n]
+
+
+def chart_colors():
+    return [ACCENT, UPLOAD, OK, WARN, CRIT, MUTED]
+
+
+def draw_text(p, rect, text, size=9, color=None, weight=QFont.Normal, align=Qt.AlignLeft | Qt.AlignVCenter):
+    p.setFont(font(size, weight))
+    p.setPen(color or TEXT)
+    p.drawText(rect, align, p.fontMetrics().elidedText(str(text), Qt.ElideRight, int(rect.width())))
+
+
+def draw_message(p, rect, text, color=None):
+    draw_text(p, rect, text, 10, color or MUTED, align=Qt.AlignCenter)
+
+
+def draw_rows(p, rect, rows, row_h=19, value_ratio=0.45):
+    """Baris bertitik: rows = [(warna, nama, nilai)]; berhenti kalau sudah tidak muat."""
+    y, vw = rect.top(), rect.width() * value_ratio
+    for col, name, value in rows:
+        if y + row_h > rect.bottom() + 1:
+            break
+        glow_dot(p, rect.left() + 4, y + row_h / 2, 3.5, col)
+        draw_text(p, QRectF(rect.left() + 14, y, rect.width() - vw - 18, row_h), name)
+        draw_text(p, QRectF(rect.right() - vw, y, vw, row_h), value, color=col, align=Qt.AlignRight | Qt.AlignVCenter)
+        y += row_h
+    return y
+
+
+def draw_donut(p, rect, slices, center="", sub=""):
+    """Pie/donut: slices = [(label, nilai, warna, teks)] dengan legenda."""
+    if rect.width() >= 300:
+        side = min(rect.height(), rect.width() * 0.5)
+        ring = QRectF(rect.left(), rect.top() + (rect.height() - side) / 2, side, side)
+        legend = QRectF(ring.right() + 16, rect.top(), rect.right() - ring.right() - 16, rect.height())
+    else:
+        side = max(40, min(rect.width(), rect.height() * 0.6))
+        ring = QRectF(rect.center().x() - side / 2, rect.top(), side, side)
+        legend = QRectF(rect.left(), ring.bottom() + 8, rect.width(), rect.bottom() - ring.bottom() - 8)
+    th = max(8.0, side * 0.15)
+    arc = ring.adjusted(th / 2 + 2, th / 2 + 2, -th / 2 - 2, -th / 2 - 2)
+    p.save()
+    p.setBrush(Qt.NoBrush)
+    p.setPen(QPen(alpha(TRACK, 22), th))
+    p.drawEllipse(arc)
+    total = sum(max(s[1], 0) for s in slices)
+    start = 90 * 16
+    for _, val, col, _ in slices:
+        if total <= 0 or val <= 0:
+            continue
+        span = -int(val / total * 360 * 16)
+        p.setPen(QPen(col, th, Qt.SolidLine, Qt.FlatCap))
+        p.drawArc(arc, start, span)
+        start += span
+    p.restore()
+    big = 15 if arc.width() > 90 else 10
+    draw_text(p, QRectF(arc.left(), arc.center().y() - big - 2, arc.width(), big * 2), center, big, TEXT, QFont.Bold, Qt.AlignCenter)
+    if sub and arc.width() > 90:
+        draw_text(p, QRectF(arc.left(), arc.center().y() + big - 2, arc.width(), 16), sub, 8, MUTED, align=Qt.AlignCenter)
+    draw_rows(p, legend, [(col, label, text) for label, _, col, text in slices], value_ratio=0.5)
+
+
+def draw_hbars(p, rect, rows, row_h=24):
+    """Bar horizontal: rows = [(label, persen 0-100, teks, warna)]."""
+    y = rect.top()
+    lw, tw = rect.width() * 0.36, min(130, rect.width() * 0.3)
+    for label, pct, text, col in rows:
+        if y + row_h > rect.bottom() + 1:
+            break
+        draw_text(p, QRectF(rect.left(), y, lw - 6, row_h), label)
+        draw_bar(p, QRectF(rect.left() + lw, y + row_h / 2 - 4, rect.width() - lw - tw - 8, 8), pct, col)
+        draw_text(p, QRectF(rect.right() - tw, y, tw, row_h), text, color=col, align=Qt.AlignRight | Qt.AlignVCenter)
+        y += row_h
+
+
+def draw_bar(p, rect, pct, color):
+    p.save()
+    p.setPen(Qt.NoPen)
+    p.setBrush(alpha(TRACK, 22))
+    p.drawRoundedRect(rect, 4, 4)
+    fill = QRectF(rect.x(), rect.y(), rect.width() * max(0, min(pct, 100)) / 100, rect.height())
+    if fill.width() > 0.5:
+        p.setBrush(color)
+        p.drawRoundedRect(fill, 4, 4)
+    p.restore()
+
+
+def draw_line(p, rect, series, ymax=None, fmt=lambda v: f"{v:.0f}", floor=1.0):
+    """Grafik garis dengan sumbu: series = [(data, warna, label)]; seri pertama diberi isi gradasi."""
+    left = 52
+    plot = QRectF(rect.left() + left, rect.top() + 6, rect.width() - left, rect.height() - 30)
+    peaks = [max(d) for d, _, _ in series if len(d)]
+    top = ymax or max(peaks + [floor]) * 1.1
+    p.save()
+    for i in range(3):
+        y = plot.bottom() - plot.height() * i / 2
+        p.setPen(QPen(alpha(TRACK, 28), 1, Qt.DotLine))
+        p.drawLine(QPointF(plot.left(), y), QPointF(plot.right(), y))
+        draw_text(p, QRectF(rect.left(), y - 8, left - 6, 16), fmt(top * i / 2), 8, MUTED, align=Qt.AlignRight | Qt.AlignVCenter)
+    step = plot.width() / (HISTORY - 1)
+    for idx, (data, col, _) in enumerate(series):
+        pts = list(data)
+        if not pts:
+            continue
+        x0 = plot.right() - step * (len(pts) - 1)
+        line = QPainterPath()
+        for i, v in enumerate(pts):
+            pt = QPointF(x0 + i * step, plot.bottom() - plot.height() * min(v / top, 1))
+            line.moveTo(pt) if i == 0 else line.lineTo(pt)
+        if idx == 0:
+            area = QPainterPath(line)
+            area.lineTo(plot.right(), plot.bottom())
+            area.lineTo(x0, plot.bottom())
+            area.closeSubpath()
+            fill = QLinearGradient(0, plot.top(), 0, plot.bottom())
+            fill.setColorAt(0, alpha(col, 110))
+            fill.setColorAt(1, alpha(col, 6))
+            p.fillPath(area, QBrush(fill))
+        p.setBrush(Qt.NoBrush)
+        p.setPen(QPen(col, 1.8, Qt.SolidLine, Qt.RoundCap, Qt.RoundJoin))
+        p.drawPath(line)
+    x = plot.left()
+    for _, col, label in series:
+        if not label:
+            continue
+        glow_dot(p, x + 4, rect.bottom() - 7, 3.5, col)
+        draw_text(p, QRectF(x + 14, rect.bottom() - 16, 120, 16), label, 8, MUTED)
+        x += 120
+    p.restore()
+
+
+def draw_gauge(p, rect, pct, text, sub="", color=None):
+    """Meteran setengah lingkaran."""
+    side = max(50.0, min(rect.width() - 8, (rect.height() - 26) * 2))
+    th = max(8.0, side * 0.13)
+    arc = QRectF(rect.center().x() - side / 2 + th / 2, rect.top() + th / 2 + 2, side - th, side - th)
+    p.save()
+    p.setBrush(Qt.NoBrush)
+    p.setPen(QPen(alpha(TRACK, 22), th, Qt.SolidLine, Qt.FlatCap))
+    p.drawArc(arc, 180 * 16, -180 * 16)
+    if pct is not None:
+        p.setPen(QPen(color or OK, th, Qt.SolidLine, Qt.FlatCap))
+        p.drawArc(arc, 180 * 16, int(-180 * 16 * max(0, min(pct, 100)) / 100))
+    p.restore()
+    size = 15 if side > 110 else 11
+    draw_text(p, QRectF(arc.left(), arc.center().y() - size * 2, arc.width(), size * 2), text, size, color or MUTED, QFont.Bold, Qt.AlignCenter)
+    draw_text(p, QRectF(rect.left(), arc.center().y() + 4, rect.width(), 16), sub, 8, MUTED, align=Qt.AlignCenter)
+
+
+def draw_gauges(p, rect, items):
+    cw = rect.width() / max(len(items), 1)
+    for i, item in enumerate(items):
+        draw_gauge(p, QRectF(rect.left() + i * cw, rect.top(), cw, rect.height()), *item)
+
+
+def draw_stats(p, rect, items, cols=2):
+    """Petak statistik: items = [(label, nilai, warna|None)]."""
+    cw, ch = rect.width() / cols, 42
+    for i, (label, value, col) in enumerate(items):
+        x, y = rect.left() + (i % cols) * cw, rect.top() + (i // cols) * ch
+        if y + ch > rect.bottom() + 1:
+            break
+        draw_text(p, QRectF(x, y, cw - 8, 16), label, 8, MUTED)
+        draw_text(p, QRectF(x, y + 16, cw - 8, 22), value, 11, col or TEXT, QFont.Bold)
+
+
+def draw_strip(p, rect, hist):
+    """Riwayat ketersediaan: satu kotak per sampel (hijau = hidup, merah = mati)."""
+    ups = sum(1 for up, _ in hist if up)
+    pct = ups / len(hist) * 100 if hist else 0
+    draw_text(p, QRectF(rect.left(), rect.top(), rect.width(), 18),
+              f"{tr('d.uptime')} {pct:.0f}% · {tr('d.samples', n=len(hist))}", 9, TEXT)
+    slot = rect.width() / HISTORY
+    h = max(10.0, min(rect.height() - 26, 30.0))
+    p.save()
+    p.setPen(Qt.NoPen)
+    for i in range(HISTORY):
+        j = len(hist) - HISTORY + i
+        col = alpha(TRACK, 22) if j < 0 else (OK if hist[j][0] else CRIT)
+        p.setBrush(col)
+        p.drawRoundedRect(QRectF(rect.left() + i * slot + 1, rect.top() + 24, slot - 2, h), 2, 2)
+    p.restore()
+
+
+ROW_WEIGHTS = {"nvme": (2, 2, 1), "memory": (2, 3)}   # tab lain: tinggi baris sama
+ROW_WEIGHTS.update({n: (3, 1) for n, _, _, _ in SERVICES if n != "UFW"})
+COMPACT_TABS = {"battery", "system", "UFW"}
+
+
+class Card(QWidget):
+    """Kartu dashboard: judul + area gambar yang diisi fungsi draw(p, rect)."""
+
+    def __init__(self, title, draw, min_h=150):
+        super().__init__()
+        self.title, self.draw = title, draw
+        self.setMinimumSize(230, min_h)
+        self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+
+    def paintEvent(self, _):
+        p = QPainter(self)
+        p.setRenderHint(QPainter.Antialiasing)
+        r = QRectF(self.rect()).adjusted(0.5, 0.5, -0.5, -0.5)
+        path = QPainterPath()
+        path.addRoundedRect(r, 10, 10)
+        p.fillPath(path, alpha(TRACK, 14))
+        p.setPen(QPen(alpha(TRACK, 34), 1))
+        p.drawPath(path)
+        title = self.title() if callable(self.title) else self.title
+        draw_text(p, QRectF(14, 8, r.width() - 28, 20), title, 10, ACCENT, QFont.Bold)
+        self.draw(p, QRectF(14, 36, r.width() - 28, r.height() - 50))
+
+
+class Dashboard(QWidget):
+    """Jendela dashboard: tab Ringkasan berisi pie/bar/line chart, lalu satu tab detail per layanan."""
+
+    def __init__(self, w):
+        super().__init__()
+        self.w = w
+        self.setWindowTitle(f"{APP_NAME} — {tr('dash.title')}")
+        self.setWindowIcon(make_icon())
+        self.resize(1200, 780)
+        self.tabs = QTabWidget(self)
+        self.tabs.tabBar().setExpanding(False)
+        lay = QVBoxLayout(self)
+        lay.setContentsMargins(12, 10, 12, 12)
+        lay.addWidget(self.tabs)
+        self.tab_keys = []   # (kunci, fungsi judul)
+        pages = [("overview", lambda: tr("tab.overview"), self.page_overview),
+                 ("cpu", lambda: "CPU", self.page_cpu),
+                 ("memory", lambda: tr("tab.memory"), self.page_memory),
+                 ("network", lambda: tr("tab.network"), self.page_network),
+                 ("nvme", lambda: "NVMe", self.page_nvme),
+                 ("battery", lambda: tr("tab.battery"), self.page_battery),
+                 ("system", lambda: tr("tab.system"), self.page_system)]
+        pages += [(n, lambda n=n: n, lambda g, n=n: self.page_service(g, n)) for n, _, _, _ in SERVICES]
+        pages.append(("Docker", lambda: "Docker", self.page_docker))
+        for key, title, build in pages:
+            page = QWidget()
+            grid = QGridLayout(page)
+            grid.setContentsMargins(0, 10, 0, 0)
+            grid.setSpacing(12)
+            for c in range(4):
+                grid.setColumnStretch(c, 1)
+            build(grid)
+            for row, weight in enumerate(ROW_WEIGHTS.get(key, ())):
+                grid.setRowStretch(row, weight)
+            if key in COMPACT_TABS:   # kartu tidak perlu melar: sisa tinggi untuk baris kosong
+                grid.setRowStretch(grid.rowCount(), 1)
+            self.tabs.addTab(page, "")
+            self.tab_keys.append((key, title))
+        self.tabs.currentChanged.connect(lambda _: self.refresh())
+        self.apply_style()
+        self.timer = QTimer(self)
+        self.timer.timeout.connect(self.refresh)
+        self.timer.start(1000)
+        self.refresh()
+
+    def apply_style(self):
+        self.setStyleSheet(
+            "QTabWidget::pane { border: none; }"
+            "QTabBar { background: transparent; }"
+            f"QTabBar::tab {{ background: transparent; color: {MUTED.name()}; padding: 8px 10px; border-bottom: 2px solid transparent; }}"
+            f"QTabBar::tab:hover {{ color: {TEXT.name()}; }}"
+            f"QTabBar::tab:selected {{ color: {ACCENT.name()}; border-bottom: 2px solid {ACCENT.name()}; }}")
+        self.tabs.setFont(font(10, QFont.Bold))
+        self.update()
+
+    def paintEvent(self, _):
+        p = QPainter(self)
+        grad = QLinearGradient(0, 0, 0, self.height())
+        grad.setColorAt(0, BG_TOP)
+        grad.setColorAt(1, BG_BOTTOM)
+        p.fillRect(self.rect(), grad)
+
+    def tab_visible(self, key):
+        w = self.w
+        if key == "battery":
+            return w.battery is not None
+        if key in w.svc:
+            return w.svc[key]["show"] and not (w.poller.data.get(key) or {}).get("absent")
+        return True
+
+    def refresh(self):
+        if not self.isVisible():
+            return
+        self.setWindowTitle(f"{APP_NAME} — {tr('dash.title')}")
+        for i, (key, title) in enumerate(self.tab_keys):
+            self.tabs.setTabText(i, title())
+            self.tabs.setTabVisible(i, self.tab_visible(key))
+        page = self.tabs.currentWidget()
+        if page:
+            for card in page.findChildren(Card):
+                card.update()
+
+    def card(self, grid, title, draw, row, col, rs=1, cs=1, min_h=150):
+        grid.addWidget(Card(title, draw, min_h), row, col, rs, cs)
+
+    # ----- data bersama -----
+    def cpu_avg(self):
+        return [sum(v) / len(v) for v in zip(*self.w.cpu_hist)]
+
+    def partitions(self):
+        return self.w.nvme_parts
+
+    def temps(self):
+        rows = []
+        for name, val, col in self.w.sensors:
+            if val.endswith("°C"):
+                rows.append((name, float(val[:-2]), val, col))
+        return sorted(rows, key=lambda r: -r[1])
+
+    def service_rows(self):
+        """(nama, info|None) untuk layanan yang tampil dan terpasang."""
+        out = []
+        for name, _, _, _ in SERVICES:
+            info = self.w.poller.data.get(name)
+            if self.w.svc[name]["show"] and not (info or {}).get("absent"):
+                out.append((name, info))
+        return out
+
+    def docker(self):
+        dk = self.w.poller.data.get("Docker")
+        return dk if dk and "error" not in dk else None
+
+    # ----- ringkasan -----
+    def page_overview(self, g):
+        w = self.w
+
+        def cpu(p, r):
+            avg = self.cpu_avg()
+            draw_line(p, r, [(avg, level_color(avg[-1] if avg else 0), "CPU %")], ymax=100, fmt=lambda v: f"{v:.0f}%")
+
+        def mem(p, r):
+            m = w.mem
+            cache = getattr(m, "buffers", 0) + getattr(m, "cached", 0)
+            free = max(m.total - m.used - cache, 0)
+            c = chart_colors()
+            draw_donut(p, r, [(tr("d.used"), m.used, level_color(m.percent), fmt_bytes(m.used)),
+                              (tr("d.cache"), cache, c[0], fmt_bytes(cache)),
+                              (tr("d.free"), free, alpha(TRACK, 70), fmt_bytes(free))],
+                       f"{m.percent:.0f}%", fmt_bytes(m.total))
+
+        def disk(p, r):
+            parts = self.partitions()
+            if not parts:
+                return draw_message(p, r, "—")
+            c = chart_colors()
+            slices = [(mount, u.used, c[i % len(c)], fmt_bytes(u.used)) for i, (mount, u) in enumerate(parts)]
+            free = sum(u.free for _, u in parts)
+            total = sum(u.total for _, u in parts)
+            slices.append((tr("d.free"), free, alpha(TRACK, 70), fmt_bytes(free)))
+            draw_donut(p, r, slices, f"{(total - free) / total * 100:.0f}%", fmt_bytes(total))
+
+        def cores(p, r):
+            draw_hbars(p, r, [(f"Core {i}", v, f"{v:.0f}%", level_color(v)) for i, v in enumerate(w.cpu_now)])
+
+        def net(p, r):
+            draw_line(p, r, [(w.net_down, ACCENT, f"↓ {fmt_rate(w.net_rate[0])}"), (w.net_up, UPLOAD, f"↑ {fmt_rate(w.net_rate[1])}")],
+                      fmt=fmt_rate, floor=10_000)
+
+        def services(p, r):
+            rows = self.service_rows()
+            up = sum(1 for _, i in rows if i and i["up"])
+            down = sum(1 for _, i in rows if i and not i["up"])
+            wait = sum(1 for _, i in rows if i is None)
+            slices = [(tr("svc.running"), up, OK, str(up)), (tr("svc.down"), down, CRIT, str(down)),
+                      (tr("checking"), wait, MUTED, str(wait))]
+            draw_donut(p, r, [s for s in slices if s[1]] or slices[:1], f"{up}/{len(rows)}", tr("svc.running"))
+
+        def temps(p, r):
+            rows = self.temps()
+            draw_hbars(p, r, [(n, v, t, c) for n, v, t, c in rows], 22) if rows else draw_message(p, r, tr("sensors.none"))
+
+        def health(p, r):
+            items = []
+            b = w.battery
+            if b and b["capacity"] is not None:
+                c = b["capacity"]
+                items.append((c, f"{c}%", tr("bat.cap"), CRIT if c < 15 else WARN if c < 35 else OK))
+            if b and b["health"] is not None:
+                h = b["health"]
+                items.append((h, f"{h:.0f}%", tr("bat.health"), CRIT if h < 60 else WARN if h < 80 else OK))
+            sm = w.smart.data
+            if sm and "error" not in sm and sm["used"] is not None:
+                left = 100 - sm["used"]
+                items.append((left, f"{left}%", tr("d.life"), CRIT if left < 20 else WARN if left < 40 else OK))
+            t = w.nvme.get("temp")
+            if t is not None:
+                items.append((min(t, 100), f"{t:.0f}°C", tr("nvme.temp") + " NVMe", temp_color(t, w.nvme.get("high"))))
+            draw_gauges(p, r, items) if items else draw_message(p, r, "—")
+
+        def docker(p, r):
+            self.docker_donut(p, r)
+
+        self.card(g, tr_fn("d.cpu"), cpu, 0, 0, 1, 2)
+        self.card(g, tr_fn("d.memory"), mem, 0, 2)
+        self.card(g, tr_fn("d.disk"), disk, 0, 3)
+        self.card(g, tr_fn("d.cores"), cores, 1, 0)
+        self.card(g, tr_fn("d.network"), net, 1, 1, 1, 2)
+        self.card(g, tr_fn("d.services"), services, 1, 3)
+        self.card(g, tr_fn("d.temps"), temps, 2, 0)
+        self.card(g, tr_fn("d.health"), health, 2, 1, 1, 2)
+        self.card(g, tr_fn("d.docker"), docker, 2, 3)
+
+    def docker_donut(self, p, r):
+        dk = self.w.poller.data.get("Docker")
+        if dk is None or "error" in dk:
+            return draw_message(p, r, tr("checking") if dk is None else tr(dk["error"]), MUTED if dk is None else CRIT)
+        groups = {"running": [0, OK], "paused": [0, WARN], "exited": [0, CRIT], "other": [0, MUTED]}
+        for c in dk["containers"]:
+            col = self.w.container_state(c)
+            key = "running" if c.get("State") == "running" else "paused" if col == WARN else "exited" if col == CRIT else "other"
+            groups[key][0] += 1
+        total = len(dk["containers"])
+        draw_donut(p, r, [(k, n, col, str(n)) for k, (n, col) in groups.items() if n],
+                   f"{groups['running'][0]}/{total}", tr("svc.running"))
+
+    # ----- CPU -----
+    def page_cpu(self, g):
+        w = self.w
+
+        def avg(p, r):
+            a = self.cpu_avg()
+            draw_line(p, r, [(a, level_color(a[-1] if a else 0), "CPU %")], ymax=100, fmt=lambda v: f"{v:.0f}%")
+
+        def stats(p, r):
+            try:
+                load = os.getloadavg()
+            except OSError:
+                load = (0, 0, 0)
+            a = sum(w.cpu_now) / len(w.cpu_now)
+            draw_stats(p, r, [(tr("d.cpu_now"), f"{a:.0f}%", level_color(a)),
+                              (tr("d.freq"), f"{w.freq / 1000:.2f} GHz" if w.freq else "—", None),
+                              (tr("d.cores_n"), str(w.ncpu), None),
+                              (tr("d.load"), " / ".join(f"{v:.2f}" for v in load), None)])
+
+        self.card(g, tr_fn("d.cpu"), avg, 0, 0, 1, 3, 200)
+        self.card(g, tr_fn("d.info"), stats, 0, 3, 1, 1, 200)
+        for i in range(w.ncpu):
+            def core(p, r, i=i):
+                v = w.cpu_hist[i]
+                draw_line(p, r, [(v, level_color(v[-1]), f"{v[-1]:.0f}%")], ymax=100, fmt=lambda x: f"{x:.0f}%")
+            self.card(g, f"Core {i}", core, 1 + i // 4, i % 4)
+
+    # ----- memori -----
+    def page_memory(self, g):
+        w = self.w
+
+        def mem(p, r):
+            m = w.mem
+            cache = getattr(m, "buffers", 0) + getattr(m, "cached", 0)
+            draw_donut(p, r, [(tr("d.used"), m.used, level_color(m.percent), fmt_bytes(m.used)),
+                              (tr("d.cache"), cache, ACCENT, fmt_bytes(cache)),
+                              (tr("d.free"), max(m.total - m.used - cache, 0), alpha(TRACK, 70), fmt_bytes(m.free))],
+                       f"{m.percent:.0f}%", fmt_bytes(m.total))
+
+        def hist(p, r):
+            draw_line(p, r, [(w.ram_hist, level_color(w.mem.percent), "RAM %")], ymax=100, fmt=lambda v: f"{v:.0f}%")
+
+        def stats(p, r):
+            m = w.mem
+            draw_stats(p, r, [(tr("d.total"), fmt_bytes(m.total), None), (tr("d.used"), fmt_bytes(m.used), level_color(m.percent)),
+                              (tr("d.available"), fmt_bytes(m.available), OK), (tr("d.cache"), fmt_bytes(getattr(m, "cached", 0) + getattr(m, "buffers", 0)), None)])
+
+        def swap(p, r):
+            if not w.swaps:
+                return draw_message(p, r, tr("swap.off"))
+            draw_hbars(p, r, [(os.path.basename(n), u / s * 100 if s else 0, f"{u / s * 100 if s else 0:.0f}% · {fmt_bytes(u)}",
+                               level_color(u / s * 100 if s else 0)) for n, _, s, u in w.swaps], 26)
+
+        def procs(p, r):
+            rows = top_memory(10)
+            if not rows:
+                return draw_message(p, r, "—")
+            peak = rows[0][1]
+            c = chart_colors()
+            draw_hbars(p, r, [(n, v / peak * 100, fmt_bytes(v), c[0]) for n, v in rows], 22)
+
+        self.card(g, tr_fn("d.memory"), mem, 0, 0, 1, 1, 220)
+        self.card(g, "RAM", hist, 0, 1, 1, 2, 220)
+        self.card(g, tr_fn("d.info"), stats, 0, 3, 1, 1, 220)
+        self.card(g, tr_fn("d.swap"), swap, 1, 0, 1, 1, 260)
+        self.card(g, tr_fn("d.topmem"), procs, 1, 1, 1, 3, 260)
+
+    # ----- jaringan -----
+    def page_network(self, g):
+        w = self.w
+
+        def lines(p, r):
+            draw_line(p, r, [(w.net_down, ACCENT, f"↓ {fmt_rate(w.net_rate[0])}"), (w.net_up, UPLOAD, f"↑ {fmt_rate(w.net_rate[1])}")],
+                      fmt=fmt_rate, floor=10_000)
+
+        def stats(p, r):
+            net = w.poller.data.get("Internet")
+            io = psutil.net_io_counters(pernic=True).get(w.iface)
+            try:
+                speed = psutil.net_if_stats()[w.iface].speed
+            except (KeyError, TypeError):
+                speed = 0
+            ms = f"{net['ms']:.0f} ms" if net and net["up"] else tr("net.offline") if net else tr("checking")
+            draw_stats(p, r, [(tr("d.iface"), w.iface or "—", None),
+                              ("Internet", ms, CRIT if net and not net["up"] else OK if net else MUTED),
+                              (tr("d.recv"), fmt_size(io.bytes_recv) if io else "—", ACCENT),
+                              (tr("d.sent"), fmt_size(io.bytes_sent) if io else "—", UPLOAD),
+                              (tr("d.speed"), f"{speed} Mbps" if speed else "—", None)])
+
+        def latency(p, r):
+            h = w.svc_hist.get("Internet", [])
+            draw_line(p, r, [([ms if up else 0 for up, ms in h], ACCENT, "ms")], fmt=lambda v: f"{v:.0f}", floor=50)
+
+        def wifi(p, r):
+            info = w.poller.data.get("WiFi") if w.is_wifi else None
+            if not info or info["signal"] is None:
+                return draw_gauge(p, r, None, "—", tr("wifi.disc") if w.is_wifi else "Ethernet")
+            s = info["signal"]
+            draw_gauge(p, r, s, f"{s}%", info["ssid"], OK if s >= 60 else WARN if s >= 35 else CRIT)
+
+        def traffic(p, r):
+            io = psutil.net_io_counters(pernic=True).get(w.iface)
+            if not io:
+                return draw_message(p, r, "—")
+            draw_donut(p, r, [(tr("d.recv"), io.bytes_recv, ACCENT, fmt_size(io.bytes_recv)),
+                              (tr("d.sent"), io.bytes_sent, UPLOAD, fmt_size(io.bytes_sent))],
+                       fmt_size(io.bytes_recv + io.bytes_sent), tr("d.traffic"))
+
+        self.card(g, tr_fn("d.network"), lines, 0, 0, 1, 3, 220)
+        self.card(g, tr_fn("d.info"), stats, 0, 3, 1, 1, 220)
+        self.card(g, tr_fn("d.latency"), latency, 1, 0, 1, 2, 220)
+        self.card(g, tr_fn("d.wifi"), wifi, 1, 2, 1, 1, 220)
+        self.card(g, tr_fn("d.traffic"), traffic, 1, 3, 1, 1, 220)
+
+    # ----- NVMe -----
+    def page_nvme(self, g):
+        w = self.w
+
+        def smart():
+            sm = w.smart.data
+            return sm if sm and "error" not in sm else None
+
+        def info(p, r):
+            n, sm = w.nvme, w.smart.data or {}
+            draw_stats(p, r, [(tr("nvme.model"), sm.get("model") or n["model"], ACCENT), ("Firmware", sm.get("fw") or n["fw"] or "—", None),
+                              ("Status", n["state"], OK if n["state"] == "live" else CRIT),
+                              (tr("nvme.temp"), f"{n['temp']:.0f}°C" if n["temp"] is not None else "—",
+                               temp_color(n["temp"], n["high"]) if n["temp"] is not None else None)], 1)
+
+        def gauges(p, r):
+            n, sm, items = w.nvme, smart(), []
+            if n["temp"] is not None:
+                items.append((min(n["temp"], 100), f"{n['temp']:.0f}°C", tr("nvme.temp"), temp_color(n["temp"], n["high"])))
+            if sm and sm["used"] is not None:
+                left = 100 - sm["used"]
+                items.append((left, f"{left}%", tr("d.life"), CRIT if left < 20 else WARN if left < 40 else OK))
+            if sm and sm["spare"] is not None:
+                items.append((sm["spare"], f"{sm['spare']}%", tr("smart.spare"), CRIT if sm["spare"] <= (sm["spare_thr"] or 0) else OK))
+            draw_gauges(p, r, items) if items else draw_message(p, r, tr("smart.denied") if w.smart.data else tr("checking"))
+
+        def io(p, r):
+            draw_line(p, r, [(w.nvme_r, ACCENT, "R " + fmt_rate(w.nvme_r[-1])), (w.nvme_w, UPLOAD, "W " + fmt_rate(w.nvme_w[-1]))],
+                      fmt=fmt_rate, floor=100_000)
+
+        def written(p, r):
+            sm = smart()
+            if not sm:
+                return draw_message(p, r, tr("smart.denied") if w.smart.data and w.smart.data.get("error") == "smart.denied" else "—")
+            draw_donut(p, r, [(tr("smart.written"), sm["written"], UPLOAD, fmt_tb(sm["written"])),
+                              (tr("smart.read"), sm["read"], ACCENT, fmt_tb(sm["read"]))],
+                       fmt_tb(sm["written"] + sm["read"]), tr("d.traffic"))
+
+        def parts(p, r):
+            rows = [(m, u.percent, f"{fmt_bytes(u.used)}/{fmt_bytes(u.total)}", level_color(u.percent)) for m, u in self.partitions()]
+            draw_hbars(p, r, rows, 28) if rows else draw_message(p, r, "—")
+
+        def smart_stats(p, r):
+            sm = smart()
+            if not sm:
+                return draw_message(p, r, tr(w.smart.data["error"]) if w.smart.data else tr("checking"), WARN)
+            bad = not sm["passed"] or sm["crit"]
+            draw_stats(p, r, [(tr("smart.health"), "PASSED" if sm["passed"] else "FAILED", CRIT if bad else OK),
+                              (tr("smart.poh"), tr("smart.poh.val", h=f"{sm['hours']:,}", d=sm["hours"] // 24) if sm["hours"] is not None else "—", None),
+                              (tr("smart.cycles"), f"{sm['cycles']:,}" if sm["cycles"] is not None else "—", None),
+                              (tr("smart.unsafe"), f"{sm['unsafe']:,}" if sm["unsafe"] is not None else "—", None),
+                              (tr("smart.media"), str(sm["media"]), CRIT if sm["media"] else OK),
+                              (tr("smart.wear"), f"{sm['used']}%" if sm["used"] is not None else "—", None)], 3)
+
+        self.card(g, tr_fn("d.info"), info, 0, 0, 1, 1, 200)
+        self.card(g, tr_fn("d.health"), gauges, 0, 1, 1, 2, 200)
+        self.card(g, tr_fn("d.written_read"), written, 0, 3, 1, 1, 200)
+        self.card(g, tr_fn("d.io"), io, 1, 0, 1, 2, 220)
+        self.card(g, tr_fn("d.partitions"), parts, 1, 2, 1, 2, 220)
+        self.card(g, tr_fn("sec.smart"), smart_stats, 2, 0, 1, 4, 130)
+
+    # ----- baterai -----
+    def page_battery(self, g):
+        w = self.w
+
+        def gauges(p, r):
+            b = w.battery
+            if not b:
+                return draw_message(p, r, "—")
+            items = []
+            if b["capacity"] is not None:
+                c = b["capacity"]
+                items.append((c, f"{c}%", tr("bat.cap"), CRIT if c < 15 else WARN if c < 35 else OK))
+            if b["health"] is not None:
+                h = b["health"]
+                items.append((h, f"{h:.0f}%", tr("bat.health"), CRIT if h < 60 else WARN if h < 80 else OK))
+            draw_gauges(p, r, items)
+
+        def design(p, r):
+            b = w.battery
+            if not b or not b["full_wh"] or not b["design_wh"]:
+                return draw_message(p, r, "—")
+            lost = max(b["design_wh"] - b["full_wh"], 0)
+            draw_donut(p, r, [(tr("bat.health"), b["full_wh"], OK, f"{b['full_wh']:.1f} Wh"), (tr("d.lost"), lost, CRIT, f"{lost:.1f} Wh")],
+                       f"{b['health']:.0f}%", f"{b['design_wh']:.1f} Wh")
+
+        def stats(p, r):
+            b = w.battery
+            if not b:
+                return
+            state = {"Charging": tr("bat.charging"), "Discharging": tr("bat.discharging"), "Full": tr("bat.full")}.get(b["status"], b["status"].lower())
+            draw_stats(p, r, [("Status", state, None), (tr("bat.cycles"), f"{b['cycles']:,}" if b["cycles"] is not None else "—", None),
+                              (tr("bat.power"), f"{b['watts']:.1f} W" if b["watts"] else "—", None),
+                              (tr("nvme.model"), b["model"] or "—", None), ("Tech", b["tech"] or "—", None)], 1)
+
+        self.card(g, tr_fn("d.health"), gauges, 0, 0, 1, 2, 240)
+        self.card(g, tr_fn("d.cap_health"), design, 0, 2, 1, 1, 240)
+        self.card(g, tr_fn("d.info"), stats, 0, 3, 1, 1, 240)
+
+    # ----- sistem -----
+    def page_system(self, g):
+        w = self.w
+
+        def stats(p, r):
+            t, u = w.install_time, os.uname()
+            draw_stats(p, r, [(tr("d.os"), w.os_name, ACCENT), (tr("d.kernel"), u.release, None),
+                              (tr("d.host"), u.nodename, None),
+                              (tr("sys.age"), fmt_age(t) if t else tr("sys.unknown"), None),
+                              (tr("sys.since", date="").strip(), t.strftime("%Y-%m-%d") if t else "—", None),
+                              ("Uptime", fmt_dur(time.time() - psutil.boot_time()), None)], 2)
+
+        def disk(p, r):
+            try:
+                u = psutil.disk_usage("/")
+            except OSError:
+                return draw_message(p, r, "—")
+            draw_donut(p, r, [(tr("d.used"), u.used, level_color(u.percent), fmt_bytes(u.used)),
+                              (tr("d.free"), u.free, alpha(TRACK, 70), fmt_bytes(u.free))], f"{u.percent:.0f}%", "/")
+
+        def load(p, r):
+            try:
+                la = os.getloadavg()
+            except OSError:
+                return draw_message(p, r, "—")
+            draw_hbars(p, r, [(f"{m} min", min(v / w.ncpu * 100, 100), f"{v:.2f}", level_color(v / w.ncpu * 100))
+                              for m, v in zip((1, 5, 15), la)], 30)
+
+        self.card(g, tr_fn("d.info"), stats, 0, 0, 1, 2, 240)
+        self.card(g, tr_fn("d.disk"), disk, 0, 2, 1, 1, 240)
+        self.card(g, tr_fn("d.load"), load, 0, 3, 1, 1, 240)
+
+    # ----- layanan (database, web server, firewall) -----
+    def page_service(self, g, name):
+        w = self.w
+
+        def stats(p, r):
+            info = w.poller.data.get(name)
+            if info is None:
+                return draw_message(p, r, tr("checking"))
+            up = info["up"]
+            col = CRIT if not up else WARN if info.get("ms", 0) >= 200 else OK
+            status = tr(info.get("up_key", "svc.running")) if up else tr(info.get("down_key", "svc.down"))
+            if "policy" in info:
+                return draw_stats(p, r, [(tr("d.status"), status, col),
+                                         (tr("d.rules"), str(info["rules"]) if info["rules"] is not None else "—", None)], 1)
+            items = [(tr("d.status"), status, col), (tr("d.port"), str(w.svc[name].get("port", "—")), None)]
+            if up:
+                items += [(tr("d.version"), info["version"], None), (tr("d.procs"), str(info["procs"]), None),
+                          (tr("d.memory"), fmt_bytes(info["rss"]), None), (tr("d.latency"), f"{info['ms']:.0f} ms", col)]
+            draw_stats(p, r, items, 2)
+
+        def latency(p, r):
+            h = w.svc_hist.get(name, [])
+            draw_line(p, r, [([ms if up else 0 for up, ms in h], ACCENT, "ms")], fmt=lambda v: f"{v:.0f}", floor=20)
+
+        def uptime(p, r):
+            h = w.svc_hist.get(name, [])
+            up = sum(1 for u, _ in h if u)
+            draw_donut(p, r, [(tr("svc.running"), up, OK, str(up)), (tr("svc.down"), len(h) - up, CRIT, str(len(h) - up))],
+                       f"{up / len(h) * 100:.0f}%" if h else "—", tr("d.uptime"))
+
+        def policy(p, r):
+            info = w.poller.data.get(name)
+            if not info or "policy" not in info:
+                return draw_message(p, r, tr("checking"))
+            items = []
+            for label, val in ((tr("d.policy_in"), info["policy"][0]), (tr("d.policy_out"), info["policy"][1])):
+                items.append((label, val, OK if val in ("DROP", "REJECT") else WARN))
+            draw_stats(p, r, items, 2)
+
+        def strip(p, r):
+            draw_strip(p, r, list(w.svc_hist.get(name, [])))
+
+        self.card(g, tr_fn("d.status"), stats, 0, 0, 1, 1, 200)
+        if name == "UFW":
+            self.card(g, tr_fn("d.policy"), policy, 0, 1, 1, 2, 200)
+        else:
+            self.card(g, tr_fn("d.latency"), latency, 0, 1, 1, 2, 200)
+        self.card(g, tr_fn("d.uptime"), uptime, 0, 3, 1, 1, 200)
+        self.card(g, tr_fn("d.avail_hist"), strip, 1, 0, 1, 4, 110)
+
+    # ----- Docker -----
+    def page_docker(self, g):
+        w = self.w
+
+        def containers(p, r):
+            dk = w.poller.data.get("Docker")
+            if dk is None or "error" in dk:
+                return draw_message(p, r, tr("checking") if dk is None else tr(dk["error"]), MUTED if dk is None else CRIT)
+            conts = sorted(dk["containers"], key=lambda c: (c.get("State") != "running", c["Names"][0]))
+            if not conts:
+                return draw_message(p, r, tr("dk.nocont"))
+            draw_rows(p, r, [(w.container_state(c), c["Names"][0].lstrip("/"), c.get("Status", "")) for c in conts], value_ratio=0.5)
+
+        def images(p, r):
+            dk = self.docker()
+            if not dk or not dk["images"]:
+                return draw_message(p, r, tr("dk.noimg"))
+            imgs = sorted(dk["images"], key=lambda i: -i.get("Size", 0))
+            peak = max(imgs[0].get("Size", 0), 1)
+            draw_hbars(p, r, [((i.get("RepoTags") or ["<none>"])[0], i.get("Size", 0) / peak * 100, fmt_bytes(i.get("Size", 0)),
+                               OK if i["Id"] in dk["used"] else MUTED) for i in imgs], 22)
+
+        def image_use(p, r):
+            dk = self.docker()
+            if not dk:
+                return draw_message(p, r, "—")
+            used = sum(i.get("Size", 0) for i in dk["images"] if i["Id"] in dk["used"])
+            rest = sum(i.get("Size", 0) for i in dk["images"]) - used
+            draw_donut(p, r, [(tr("d.img_use"), used, OK, fmt_bytes(used)), (tr("d.img_idle"), rest, MUTED, fmt_bytes(rest))],
+                       fmt_bytes(used + rest), tr("sec.images"))
+
+        self.card(g, tr_fn("d.docker"), lambda p, r: self.docker_donut(p, r), 0, 0, 1, 1, 220)
+        self.card(g, tr_fn("d.containers_list"), containers, 0, 1, 1, 3, 220)
+        self.card(g, tr_fn("d.images"), images, 1, 0, 1, 3, 260)
+        self.card(g, tr_fn("d.img_use"), image_use, 1, 3, 1, 1, 260)
+
+
+def tr_fn(key):
+    return lambda: tr(key)
 
 
 def main():

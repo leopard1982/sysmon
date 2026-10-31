@@ -30,6 +30,7 @@
 | 🩺 **NVMe SMART** | Health, spare, wear, data written/read, power-on hours, power cycles, unsafe shutdowns |
 | 🔋 **Battery** | Charge, **health** (full vs design), cycles, power draw, model |
 | 🕰️ **Install age** | How long Linux has been installed on this computer |
+| 📊 **Dashboard** | Separate window: overview with pie, bar and line charts, plus a **detail tab per service** |
 | 🌡️ **Sensors** | All temperature sensors and fans |
 | 🌐 **Web & firewall** | **Nginx**, **Apache**, **UFW** — status, version, processes, memory |
 | 🗄️ **Databases** | **PostgreSQL**, **MariaDB**, **MongoDB**, **Redis** — status, version, processes, memory, latency |
@@ -40,6 +41,20 @@
 | 🔔 **System tray** | Tray icon, start at login (toggle on/off) |
 
 No root required. Database checks use **no username/password** — they only verify that the server responds.
+
+<details open>
+<summary>📊 Dashboard</summary>
+
+**Overview**
+
+<img src="docs/screenshots/dashboard.png" alt="Dashboard overview">
+
+**NVMe tab** and **service tab** (PostgreSQL)
+
+<img src="docs/screenshots/dashboard-nvme.png" alt="Dashboard NVMe">
+<img src="docs/screenshots/dashboard-service.png" alt="Dashboard service">
+
+</details>
 
 <details>
 <summary>📸 More screenshots</summary>
@@ -60,7 +75,7 @@ No root required. Database checks use **no username/password** — they only ver
 
 ### Option 1 — `.deb` package (recommended)
 
-Download the latest `.deb` from [Releases](../../releases), then:
+Download the latest `.deb` from [Releases](../../releases), or straight from the [`dist/`](dist/) folder in this repo (`desktop-htop_<version>_all.deb`), then:
 
 ```bash
 sudo apt install ./desktop-htop_*_all.deb
@@ -84,6 +99,8 @@ python3 htop_widget.py
 
 ### Build the `.deb` yourself
 
+Needs `dpkg-deb`, `python3`, `python3-pyqt5`, `python3-psutil` (plus `lintian`, `desktop-file-utils` for `make lint`). The version comes from the `VERSION` file. The build output in `dist/` is committed so anyone can use it right away.
+
 ```bash
 make deb          # output: dist/desktop-htop_<version>_all.deb
 make lint         # lintian + .desktop validation
@@ -98,6 +115,7 @@ make lint         # lintian + .desktop validation
 | Menu | What it does |
 |---|---|
 | Lock position | Prevent accidental dragging |
+| Open dashboard | Dashboard window: Overview tab + one tab per service (CPU, Memory, Network, NVMe, Battery, System, databases, web servers, UFW, Docker) |
 | Show on top | Keep the widget in front of other windows (default: below them, above the wallpaper) |
 | Show background | Turn off to draw text straight onto the wallpaper |
 | Background opacity | Light / Medium / Solid |

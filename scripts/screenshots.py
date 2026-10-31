@@ -104,6 +104,27 @@ def inject_poller(w):
     w.poller.data = d
 
 
+def dashboard_shots(w, app):
+    """Dashboard: riwayat layanan dan I/O NVMe diisi data DEMO supaya grafiknya tidak kosong."""
+    rnd = random.Random(3)
+    for name in ("PostgreSQL", "MariaDB", "MongoDB", "Redis", "Nginx", "Apache", "Internet", "UFW"):
+        hist = w.svc_hist.setdefault(name, h.deque(maxlen=h.HISTORY))
+        hist.clear()
+        hist.extend((rnd.random() > 0.03, rnd.uniform(1, 25)) for _ in range(h.HISTORY))
+    for q, top in ((w.nvme_r, 3e7), (w.nvme_w, 1e7)):
+        q.clear()
+        q.extend(rnd.uniform(0, top) for _ in range(h.HISTORY))
+    dash = h.Dashboard(w)
+    dash.show()
+    for key, out in (("overview", "dashboard"), ("nvme", "dashboard-nvme"), ("PostgreSQL", "dashboard-service")):
+        dash.tabs.setCurrentIndex([k for k, _ in dash.tab_keys].index(key))
+        dash.refresh()
+        app.processEvents()
+        dash.grab().save(os.path.join(OUT, out + ".png"))
+        print("tulis docs/screenshots/" + out + ".png")
+    dash.close()
+
+
 def main():
     os.makedirs(OUT, exist_ok=True)
     app = QApplication(sys.argv)
@@ -142,6 +163,10 @@ def main():
     w.set_font("Sans")
     inject_poller(w)
     compose(w, os.path.join(OUT, "theme-light.png"))
+
+    w.set_theme("Default")
+    inject_poller(w)
+    dashboard_shots(w, app)
 
     h.make_icon(256).pixmap(256, 256).save(os.path.join(ROOT, "docs", "logo.png"))
 

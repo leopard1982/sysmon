@@ -15,4 +15,4 @@ screenshots:
 	python3 scripts/screenshots.py
 
 clean:
-	rm -rf build dist __pycache__
+	rm -rf build __pycache__   # dist/ berisi .deb yang ikut di-commit, jangan dihapus

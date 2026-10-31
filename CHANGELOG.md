@@ -2,6 +2,14 @@
 
 Format mengikuti [Keep a Changelog](https://keepachangelog.com/id-ID/1.1.0/).
 
+## [1.12.0]
+### Ditambahkan
+- **Dashboard** (menu klik kanan / tray → *Buka Dashboard*): tab **Ringkasan** berisi pie/donut, bar, grafik garis, dan meteran (CPU, memori, penyimpanan, jaringan, status layanan, suhu, kesehatan, Docker).
+- Tab detail per layanan, bernama sesuai layanannya: **CPU, Memori, Jaringan, NVMe, Baterai, Sistem, PostgreSQL, MariaDB, MongoDB, Redis, Nginx, Apache, UFW, Docker**. Tiap tab layanan punya status, grafik latensi, uptime, dan riwayat ketersediaan. Tab layanan yang disembunyikan atau tidak terpasang ikut disembunyikan.
+- Dashboard mengikuti tema dan bahasa yang dipilih.
+### Diubah
+- Folder `dist/` (berisi `.deb`) kini ikut di-commit supaya paket bisa langsung diunduh dari repo; `make clean` tidak lagi menghapusnya.
+
 ## [1.11.0]
 ### Ditambahkan
 - **SMART NVMe** (kesehatan, cadangan, keausan, data ditulis/dibaca, jam nyala, siklus daya, shutdown tak aman) lewat `smartctl`. `smartmontools` menjadi paket rekomendasi; `sudo desktop-htop-smart-setup` memberi izin baca SMART tanpa password (opt-in).

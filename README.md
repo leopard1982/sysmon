@@ -30,6 +30,7 @@
 | 🩺 **SMART NVMe** | Kesehatan, cadangan, keausan, data ditulis/dibaca, jam nyala, siklus daya, shutdown tak aman |
 | 🔋 **Baterai** | Kapasitas, **kesehatan** (penuh vs desain), siklus, daya, model |
 | 🕰️ **Usia instalasi** | Sudah berapa lama Linux terpasang di komputer |
+| 📊 **Dashboard** | Jendela terpisah: ringkasan dengan pie, bar, dan grafik garis, plus **tab detail per layanan** |
 | 🌡️ **Sensor** | Semua sensor suhu dan kipas |
 | 🌐 **Web & firewall** | **Nginx**, **Apache**, **UFW** — status, versi, proses, memori |
 | 🗄️ **Database** | **PostgreSQL**, **MariaDB**, **MongoDB**, **Redis** — status, versi, proses, memori, latensi |
@@ -40,6 +41,20 @@
 | 🔔 **System tray** | Ikon di tray, autostart saat login (bisa diatur on/off) |
 
 Tidak butuh root. Cek database **tanpa username/password** — hanya memeriksa apakah server merespons.
+
+<details open>
+<summary>📊 Dashboard</summary>
+
+**Ringkasan**
+
+<img src="docs/screenshots/dashboard.png" alt="Dashboard ringkasan">
+
+**Tab NVMe** dan **tab layanan** (PostgreSQL)
+
+<img src="docs/screenshots/dashboard-nvme.png" alt="Dashboard NVMe">
+<img src="docs/screenshots/dashboard-service.png" alt="Dashboard layanan">
+
+</details>
 
 <details>
 <summary>📸 Lebih banyak tampilan</summary>
@@ -64,7 +79,7 @@ Tidak butuh root. Cek database **tanpa username/password** — hanya memeriksa a
 
 ### Opsi 1 — paket `.deb` (disarankan)
 
-Unduh `.deb` terbaru dari halaman [Releases](../../releases), lalu:
+Unduh `.deb` terbaru dari halaman [Releases](../../releases), atau langsung dari folder [`dist/`](dist/) di repo ini (`desktop-htop_<versi>_all.deb`), lalu:
 
 ```bash
 sudo apt install ./desktop-htop_*_all.deb
@@ -88,6 +103,8 @@ python3 htop_widget.py
 
 ### Build `.deb` sendiri
 
+Butuh `dpkg-deb`, `python3`, `python3-pyqt5`, `python3-psutil` (dan `lintian`, `desktop-file-utils` untuk `make lint`). Versi diambil dari file `VERSION`. Hasil build di `dist/` ikut di-commit supaya orang bisa langsung memakainya.
+
 ```bash
 make deb          # hasil: dist/desktop-htop_<versi>_all.deb
 make lint         # lintian + validasi .desktop
@@ -102,6 +119,7 @@ make lint         # lintian + validasi .desktop
 | Menu | Fungsi |
 |---|---|
 | Kunci posisi | Cegah widget tergeser tidak sengaja |
+| Buka Dashboard | Jendela dashboard: tab Ringkasan + satu tab per layanan (CPU, Memori, Jaringan, NVMe, Baterai, Sistem, database, web server, UFW, Docker) |
 | Tampilkan di atas | Widget selalu di depan window lain (bawaan: di bawah, di atas wallpaper) |
 | Tampilkan background | Matikan untuk teks langsung di atas wallpaper |
 | Transparansi background | Tipis / Sedang / Pekat |

@@ -12,4 +12,4 @@ Description: System Monitoring - widget monitor sistem di desktop
  sensor suhu, baterai (kesehatan), usia instalasi Linux, Nginx, Apache, UFW,
  PostgreSQL, MariaDB, MongoDB, Redis, serta container dan image Docker.
  Punya ikon di system tray, tema tulisan, dan bisa dijalankan otomatis
- saat login.
+ saat login. Dashboard berisi chart ringkasan dan tab detail per layanan.
