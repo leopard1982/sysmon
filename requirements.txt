@@ -1,0 +1,4 @@
+# Pemasangan lewat apt lebih disarankan di Debian/Ubuntu:
+#   sudo apt install python3-psutil python3-pyqt5
+psutil>=5.9
+PyQt5>=5.15

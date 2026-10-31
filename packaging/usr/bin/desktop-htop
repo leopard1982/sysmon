@@ -1,0 +1,2 @@
+#!/bin/sh
+exec python3 /usr/lib/desktop-htop/htop_widget.py "$@"

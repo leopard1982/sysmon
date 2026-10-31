@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=System Monitoring
+Comment=Widget monitor sistem di desktop
+Exec=desktop-htop
+Icon=desktop-htop
+Terminal=false
+X-GNOME-Autostart-enabled=true
+X-GNOME-Autostart-Delay=3
+X-KDE-autostart-after=panel
+X-KDE-StartupNotify=false

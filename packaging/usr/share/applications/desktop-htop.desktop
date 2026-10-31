@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=System Monitoring
+GenericName=Desktop Monitor Widget
+Comment=Widget monitor CPU, RAM, jaringan, NVMe, database, dan Docker di atas wallpaper
+Exec=desktop-htop
+Icon=desktop-htop
+Categories=System;Monitor;
+Keywords=desktop;htop;monitor;system;cpu;ram;memory;swap;nvme;sensor;network;docker;postgresql;mariadb;mongodb;redis;widget;
+Terminal=false
+StartupNotify=false

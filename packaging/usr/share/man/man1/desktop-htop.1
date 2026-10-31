@@ -1,0 +1,19 @@
+.TH DESKTOP-HTOP 1 "2026" "desktop-htop" "User Commands"
+.SH NAME
+desktop-htop \- System Monitoring, widget monitor sistem di atas wallpaper
+.SH SYNOPSIS
+.B desktop-htop
+.SH DESCRIPTION
+Menampilkan widget transparan berisi CPU per core, RAM, swap, jaringan, NVMe, sensor,
+PostgreSQL, MariaDB, MongoDB, Redis, serta container dan image Docker.
+Semua pengaturan ada di menu klik kanan widget atau ikon system tray.
+Hanya satu instance yang berjalan pada satu waktu.
+.SH FILES
+.TP
+.I ~/.config/desktop_htop.json
+Pengaturan pengguna (posisi, tema, bahasa, layanan, interval).
+.TP
+.I ~/.config/autostart/desktop-htop.desktop
+Menimpa pengaturan autostart bawaan paket.
+.SH AUTHOR
+Suryo Adhy Chandra
