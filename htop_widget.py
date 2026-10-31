@@ -196,6 +196,7 @@ I18N = {
     "d.used": ("Terpakai", "Used"),
     "d.cache": ("Cache & buffer", "Cache & buffers"),
     "d.free": ("Bebas", "Free"),
+    "d.reserved": ("Cadangan root", "Root reserved"),
     "d.freq": ("Frekuensi", "Frequency"),
     "d.cores_n": ("Jumlah core", "Cores"),
     "d.load": ("Beban rata-rata", "Load average"),
@@ -1895,7 +1896,7 @@ def draw_donut(p, rect, slices, center="", sub=""):
         ring = QRectF(rect.left(), rect.top() + (rect.height() - side) / 2, side, side)
         legend = QRectF(ring.right() + 16, rect.top(), rect.right() - ring.right() - 16, rect.height())
     else:
-        side = max(40, min(rect.width(), rect.height() * 0.6))
+        side = max(56, min(rect.width(), rect.height() * 0.6, rect.height() - len(slices) * 19 - 10))   # sisakan tempat legenda
         ring = QRectF(rect.center().x() - side / 2, rect.top(), side, side)
         legend = QRectF(rect.left(), ring.bottom() + 8, rect.width(), rect.bottom() - ring.bottom() - 8)
     th = max(8.0, side * 0.15)
@@ -2215,10 +2216,14 @@ class Dashboard(QWidget):
                 return draw_message(p, r, "—")
             c = chart_colors()
             slices = [(mount, u.used, c[i % len(c)], fmt_bytes(u.used)) for i, (mount, u) in enumerate(parts)]
-            free = sum(u.free for _, u in parts)
+            used = sum(u.used for _, u in parts)
+            free = sum(u.free for _, u in parts)   # tersedia untuk user biasa (seperti kolom Avail di df)
             total = sum(u.total for _, u in parts)
+            reserved = max(total - used - free, 0)   # blok cadangan root (5% bawaan ext4)
             slices.append((tr("d.free"), free, alpha(TRACK, 70), fmt_bytes(free)))
-            draw_donut(p, r, slices, f"{(total - free) / total * 100:.0f}%", fmt_bytes(total))
+            if reserved > total * 0.01:
+                slices.append((tr("d.reserved"), reserved, alpha(TRACK, 35), fmt_bytes(reserved)))
+            draw_donut(p, r, slices, f"{used / (used + free) * 100:.0f}%", fmt_bytes(total))   # persen sama dengan df
 
         def cores(p, r):
             draw_hbars(p, r, [(f"Core {i}", v, f"{v:.0f}%", level_color(v)) for i, v in enumerate(w.cpu_now)])

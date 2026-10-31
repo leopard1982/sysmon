@@ -2,6 +2,11 @@
 
 Format mengikuti [Keep a Changelog](https://keepachangelog.com/id-ID/1.1.0/).
 
+## [1.14.1]
+### Diperbaiki
+- Donut **Penyimpanan** di Ringkasan dashboard menampilkan persen terlalu tinggi (47% padahal `df` 45%): blok cadangan root ikut dihitung terpakai. Persen kini `terpakai / (terpakai + tersedia)` seperti `df`, dan ada irisan **Cadangan root** supaya total cocok.
+- Donut menyesuaikan ukuran agar legenda tidak terpotong di jendela yang pendek.
+
 ## [1.14.0]
 ### Diubah
 - **Tampilan awal kini dashboard** (dengan tab), bukan widget kecil. Widget desktop jadi opsional: menu **Tampilkan widget di desktop** (bawaan mati; pengguna lama perlu mencentangnya kalau masih ingin widget).
