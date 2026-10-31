@@ -82,7 +82,8 @@ LANG = "id"
 
 I18N = {
     # menu
-    "menu.toggle": ("Tampilkan / sembunyikan widget", "Show / hide widget"),
+    "menu.toggle": ("Tampilkan / sembunyikan dashboard", "Show / hide dashboard"),
+    "menu.widget": ("Tampilkan widget di desktop", "Show desktop widget"),
     "menu.lock": ("Kunci posisi", "Lock position"),
     "menu.top": ("Tampilkan di atas (selalu di depan)", "Show on top (always in front)"),
     "menu.bg": ("Tampilkan background", "Show background"),
@@ -900,6 +901,7 @@ class Widget(QWidget):
             self.opacity_bg, self.show_bg = 140, False
         self.locked = self.cfg.get("locked", False)
         self.on_top = bool(self.cfg.get("on_top", False))
+        self.show_widget = bool(self.cfg.get("show_widget", False))   # tampilan awal: dashboard, widget opsional
         self.svc = {n: {"show": True, **({"port": port} if port else {})} for n, _, _, port in SERVICES}
         self.svc["Docker"] = {"show": True}
         for k, v in (self.cfg.get("services") or {}).items():
@@ -996,7 +998,7 @@ class Widget(QWidget):
 
     def on_tray(self, reason):
         if reason in (QSystemTrayIcon.Trigger, QSystemTrayIcon.DoubleClick):
-            self.toggle_visible()
+            self.toggle_dashboard()
 
     def open_dashboard(self):
         if self.dashboard is None:
@@ -1033,17 +1035,27 @@ class Widget(QWidget):
         else:
             QMessageBox.warning(None, tr("smart.login_title"), tr("smart.login_fail", err=err))
 
-    def toggle_visible(self):
-        self.setVisible(not self.isVisible())
+    def toggle_dashboard(self):
+        if self.dashboard is not None and self.dashboard.isVisible():
+            self.dashboard.hide()
+        else:
+            self.open_dashboard()
+
+    def set_show_widget(self, v):
+        self.show_widget = v
+        self.setVisible(v)
+        self.persist()
 
     def build_menu(self, parent):
         m = QMenu(parent)
         m.addAction(APP_NAME).setEnabled(False)
         m.addSeparator()
-        m.addAction(tr("menu.dashboard")).triggered.connect(self.open_dashboard)
+        m.addAction(tr("menu.toggle")).triggered.connect(self.toggle_dashboard)
         if (self.smart.data or {}).get("error") == "smart.denied":
             m.addAction(tr("menu.smart_login")).triggered.connect(self.ask_smart_login)
-        m.addAction(tr("menu.toggle")).triggered.connect(self.toggle_visible)
+        desk = QAction(tr("menu.widget"), m, checkable=True, checked=self.show_widget)
+        desk.toggled.connect(self.set_show_widget)
+        m.addAction(desk)
         lock = QAction(tr("menu.lock"), m, checkable=True, checked=self.locked)
         lock.toggled.connect(self.set_locked)
         m.addAction(lock)
@@ -1724,7 +1736,7 @@ class Widget(QWidget):
             self.persist()
 
     def persist(self):
-        self.cfg.update(x=self.x(), y=self.y(), opacity=self.opacity_bg, show_bg=self.show_bg, fx=FX, lang=LANG, services=self.svc, theme=self.theme, font=self.font_name, locked=self.locked, on_top=self.on_top,
+        self.cfg.update(x=self.x(), y=self.y(), opacity=self.opacity_bg, show_bg=self.show_bg, fx=FX, lang=LANG, services=self.svc, theme=self.theme, font=self.font_name, locked=self.locked, on_top=self.on_top, show_widget=self.show_widget,
                         interval=self.interval)
         save_config(self.cfg)
         if hasattr(self, "tray"):   # sinkronkan centang menu tray
@@ -2067,7 +2079,9 @@ class Dashboard(QWidget):
         self.w = w
         self.setWindowTitle(f"{APP_NAME} — {tr('dash.title')}")
         self.setWindowIcon(make_icon())
-        self.resize(1200, 780)
+        area = QApplication.primaryScreen().availableGeometry()   # jangan lebih besar dari layar
+        self.resize(min(1200, area.width() - 20), min(780, area.height() - 20))
+        self.move(area.center() - self.rect().center())
         self.tabs = QTabWidget(self)
         self.tabs.tabBar().setExpanding(False)
         lay = QVBoxLayout(self)
@@ -2619,8 +2633,10 @@ def main():
         sys.exit(0)
 
     w = Widget()
-    w.show()
-    w.fade_in()
+    if w.show_widget:
+        w.show()
+        w.fade_in()
+    w.open_dashboard()   # tampilan awal
     sys.exit(app.exec_())
 
 

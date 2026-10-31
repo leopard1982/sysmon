@@ -110,7 +110,8 @@ make lint         # lintian + .desktop validation
 
 - **Drag** with the left mouse button to move the widget (position is saved).
 - **Right-click** the widget or the tray icon for the menu.
-- **Left-click the tray icon** to hide/show the widget.
+- The **dashboard** opens right away when the app starts. **Left-click the tray icon** to hide/show it; closing the window only hides it (the app stays in the tray).
+- The small desktop widget is optional: tick **Show desktop widget** in the menu.
 
 | Menu | What it does |
 |---|---|
@@ -188,7 +189,8 @@ Service checks run in a background thread and only for services that are shown, 
 
 | Problem | Fix |
 |---|---|
-| Widget is not visible | It sits below all windows. Show the desktop or click the tray icon |
+| Dashboard is not visible | Click the tray icon, or right-click → **Show / hide dashboard** |
+| Desktop widget is not visible | Tick **Show desktop widget**. It sits below all windows; show the desktop or enable **Show on top** |
 | No tray icon | Make sure *System Tray* is enabled in your panel |
 | SMART: "smartctl is not installed" | `sudo apt install smartmontools` |
 | SMART: "root access needed" | Click **Root login…** and enter the root password, or run `sudo desktop-htop-smart-setup`. If the root account is locked (Ubuntu), use `sudo desktop-htop-smart-setup` |

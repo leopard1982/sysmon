@@ -114,7 +114,8 @@ make lint         # lintian + validasi .desktop
 
 - **Drag** dengan klik kiri untuk memindahkan widget (posisi tersimpan).
 - **Klik kanan** widget atau ikon tray untuk membuka menu.
-- **Klik kiri ikon tray** untuk menyembunyikan/menampilkan widget.
+- **Dashboard** langsung tampil saat aplikasi dibuka. **Klik kiri ikon tray** untuk menyembunyikan/menampilkannya; menutup jendela hanya menyembunyikan (aplikasi tetap di tray).
+- Widget kecil di desktop bersifat opsional: centang **Tampilkan widget di desktop** di menu.
 
 | Menu | Fungsi |
 |---|---|
@@ -192,7 +193,8 @@ Pengecekan layanan jalan di thread terpisah dan hanya untuk layanan yang ditampi
 
 | Masalah | Solusi |
 |---|---|
-| Widget tidak kelihatan | Widget berada di bawah semua window. Tampilkan desktop atau klik ikon tray |
+| Dashboard tidak kelihatan | Klik ikon tray, atau klik kanan → **Tampilkan / sembunyikan dashboard** |
+| Widget desktop tidak kelihatan | Centang **Tampilkan widget di desktop**. Widget berada di bawah semua window; tampilkan desktop atau aktifkan **Tampilkan di atas** |
 | Ikon tray tidak muncul | Pastikan *System Tray* aktif di panel |
 | Docker: "akses ditolak" | `sudo usermod -aG docker $USER`, lalu login ulang |
 | Ikon launcher lama | `kbuildsycoca6 --noincremental` atau login ulang |

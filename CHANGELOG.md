@@ -2,6 +2,11 @@
 
 Format mengikuti [Keep a Changelog](https://keepachangelog.com/id-ID/1.1.0/).
 
+## [1.14.0]
+### Diubah
+- **Tampilan awal kini dashboard** (dengan tab), bukan widget kecil. Widget desktop jadi opsional: menu **Tampilkan widget di desktop** (bawaan mati; pengguna lama perlu mencentangnya kalau masih ingin widget).
+- Klik kiri ikon tray menyembunyikan/menampilkan dashboard. Ukuran jendela dashboard menyesuaikan layar.
+
 ## [1.13.0]
 ### Ditambahkan
 - Tombol **Login root…** saat SMART ditolak (di widget, menu klik kanan, dan tab NVMe dashboard): masukkan password root, izin baca SMART diberikan lewat `su` + `desktop-htop-smart-setup`, lalu SMART langsung dimuat ulang. Password hanya dikirim ke `su`, tidak disimpan.
