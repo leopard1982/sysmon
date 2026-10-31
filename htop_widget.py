@@ -9,6 +9,7 @@ Interaksi:
 import glob
 import http.client
 import json
+import math
 import os
 import pty
 import pwd
@@ -31,7 +32,8 @@ import psutil
 from PyQt5.QtCore import QDir, QLockFile, QPointF, QPropertyAnimation, QRectF, Qt, QTimer, pyqtSignal
 from PyQt5.QtGui import QBrush, QColor, QFont, QIcon, QImage, QLinearGradient, QRadialGradient, QPainter, QPainterPath, QPen, QPixmap
 from PyQt5.QtWidgets import (QAction, QActionGroup, QApplication, QGridLayout, QInputDialog, QLineEdit, QMenu,
-                             QMessageBox, QPushButton, QSizePolicy, QSystemTrayIcon, QTabWidget, QVBoxLayout, QWidget)
+                             QMessageBox, QPushButton, QSizePolicy, QSystemTrayIcon, QTabWidget, QToolTip, QVBoxLayout,
+                             QWidget)
 
 CONFIG = os.path.expanduser("~/.config/desktop_htop.json")
 HISTORY = 60          # jumlah sampel grafik
@@ -245,6 +247,13 @@ I18N = {
     "smart.login_wrong": ('password root salah (atau akun root dikunci)', 'wrong root password (or the root account is locked)'),
     "smart.login_timeout": ('waktu habis', 'timed out'),
     "smart.login_noscript": ('desktop-htop-smart-setup belum terpasang. Pasang paket .deb, atau jalankan skripnya dari folder packaging/usr/bin dengan sudo.', 'desktop-htop-smart-setup is not installed. Install the .deb package, or run the script from packaging/usr/bin with sudo.'),
+    "d.now": ('sekarang', 'now'),
+    "d.ago": ('{t} lalu', '{t} ago'),
+    "d.down": ('Unduh', 'Download'),
+    "d.up": ('Unggah', 'Upload'),
+    "d.read": ('Baca', 'Read'),
+    "d.write": ('Tulis', 'Write'),
+    "d.latency_name": ('Latensi', 'Latency'),
     "legend.ok": ("Bagus", "Good"),
     "legend.warn": ("Hati-hati", "Caution"),
     "legend.crit": ("Tinggi", "High"),
@@ -942,6 +951,8 @@ class Widget(QWidget):
         self.smart = SmartPoller()
         self.smart.start()
         self.smart_btn = None             # area tombol login root (diisi saat paint)
+        self.hot = []                     # area hover untuk tooltip (diisi saat paint)
+        self.setMouseTracking(True)
         self._smart_login_busy = False
         self.smartLoginDone.connect(self.on_smart_login)
         self.nvme_parts = []
@@ -1263,8 +1274,12 @@ class Widget(QWidget):
             p.drawImage(dx, dy, shadow)
         p.drawImage(0, 0, layer)
 
+    def add_tip(self, rect, tip):
+        self.hot.append((QRectF(rect), tip if callable(tip) else (lambda pos, t=tip: t)))
+
     def paint_content(self, p):
         self.smart_btn = None
+        self.hot = []
         lx, colw = 16, COLW
         rx = lx + COLW + 24
         cx = rx + COLW + 24
@@ -1343,7 +1358,19 @@ class Widget(QWidget):
         p.drawLine(x, y + 21, x + w, y + 21)
         return y + 28
 
-    def graph(self, p, rect, data, color):
+    def graph(self, p, rect, data, color, name="", fmt=lambda v: f"{v:.0f}%", raw=None):
+        """raw = nilai asli untuk tooltip kalau data sudah dinormalisasi."""
+        values = raw if raw is not None else data
+        step_w = rect.width() / (HISTORY - 1)
+
+        def tip(pos):
+            k = int(round((rect.right() - pos.x()) / step_w))
+            n = len(values)
+            if not 0 <= k < n:
+                return None
+            vals = list(values)
+            return f"{name}: {fmt(vals[n - 1 - k])}\n{fmt_ago(k * self.interval)}"
+        self.add_tip(rect, tip)
         p.save()
         p.setPen(Qt.NoPen)
         p.setBrush(alpha(TRACK, 14))
@@ -1385,7 +1412,7 @@ class Widget(QWidget):
         p.setFont(font(9))
         p.setPen(TEXT)
         p.drawText(QRectF(x, y, 46, 20), Qt.AlignLeft | Qt.AlignVCenter, f"Core {i}")
-        self.graph(p, QRectF(x + 50, y, w - 50 - 48, 34), self.cpu_hist[i], col)
+        self.graph(p, QRectF(x + 50, y, w - 50 - 48, 34), self.cpu_hist[i], col, name=f"Core {i}")
         p.setFont(font(11, QFont.Bold))
         p.setPen(col)
         p.drawText(QRectF(x + w - 44, y, 44, 34), Qt.AlignRight | Qt.AlignVCenter, f"{pct:.0f}%")
@@ -1412,7 +1439,7 @@ class Widget(QWidget):
     def ram_block(self, p, x, y, w):
         pct = self.mem.percent
         col = level_color(pct)
-        self.graph(p, QRectF(x, y, w - 52, 44), self.ram_hist, col)
+        self.graph(p, QRectF(x, y, w - 52, 44), self.ram_hist, col, name="RAM")
         p.setFont(font(13, QFont.Bold))
         p.setPen(col)
         p.drawText(QRectF(x + w - 48, y, 48, 44), Qt.AlignRight | Qt.AlignVCenter, f"{pct:.0f}%")
@@ -1432,6 +1459,7 @@ class Widget(QWidget):
         p.setPen(col)
         p.drawText(QRectF(x + w - value_w, y, value_w, 18), Qt.AlignRight | Qt.AlignVCenter,
                    p.fontMetrics().elidedText(value, Qt.ElideRight, int(value_w)))
+        self.add_tip(QRectF(x, y, w, 18), f"{name}: {value}")
 
     def usage_row(self, p, x, y, w, name, pct, text):
         col = level_color(pct)
@@ -1442,6 +1470,7 @@ class Widget(QWidget):
         self.bar(p, QRectF(x + 66, y + 4, w - 66 - 138, 8), pct, col)
         p.setPen(col)
         p.drawText(QRectF(x + w - 134, y, 134, 16), Qt.AlignRight | Qt.AlignVCenter, text)
+        self.add_tip(QRectF(x, y, w, 16), f"{name}: {text} ({pct:.0f}%)")
         return y + 22
 
     def swap_block(self, p, x, y, w):
@@ -1462,7 +1491,7 @@ class Widget(QWidget):
         p.setFont(font(9, QFont.Bold))
         p.setPen(color)
         p.drawText(QRectF(x, y, 86, 26), Qt.AlignLeft | Qt.AlignVCenter, f"{arrow} {fmt_rate(rate)}")
-        self.graph(p, QRectF(x + 92, y, w - 92, 26), norm, color)
+        self.graph(p, QRectF(x + 92, y, w - 92, 26), norm, color, name=arrow, fmt=fmt_rate, raw=hist)
         return y + 32
 
     def network_block(self, p, x, y, w):
@@ -1574,6 +1603,7 @@ class Widget(QWidget):
             p.drawText(QRectF(x + 14, y + 17, w - 14, 14), Qt.AlignLeft | Qt.AlignVCenter,
                        p.fontMetrics().elidedText(detail, Qt.ElideRight, int(w - 14)))
             p.setFont(font(9))
+            self.add_tip(QRectF(x, y, w, 36), f"{name}: {status}\n{detail}" if detail else f"{name}: {status}")
             y += 38
         return y
 
@@ -1705,6 +1735,7 @@ class Widget(QWidget):
                        p.fontMetrics().elidedText(name, Qt.ElideRight, int(w - 128)))
             p.setPen(col)
             p.drawText(QRectF(x + w - 110, y, 110, 18), Qt.AlignRight | Qt.AlignVCenter, val)
+            self.add_tip(QRectF(x, y, w, 18), f"{name}: {val}")
             y += 19
 
     def legend(self, p, x, y, w):
@@ -1730,6 +1761,12 @@ class Widget(QWidget):
     def mouseMoveEvent(self, e):
         if self.drag is not None and e.buttons() & Qt.LeftButton:
             self.move(e.globalPos() - self.drag)
+            return
+        text = hot_text(self.hot, QPointF(e.pos()))
+        QToolTip.showText(e.globalPos(), text, self) if text else QToolTip.hideText()
+
+    def leaveEvent(self, _):
+        QToolTip.hideText()
 
     def mouseReleaseEvent(self, e):
         if self.drag is not None:
@@ -1866,6 +1903,35 @@ def chart_colors():
     return [ACCENT, UPLOAD, OK, WARN, CRIT, MUTED]
 
 
+_hot = []       # area hover chart yang sedang digambar: [(QRectF, fn(pos) -> teks | None)]
+_hover = None   # posisi mouse (QPointF) pada kartu yang sedang digambar, atau None
+
+
+def fmt_ago(secs):
+    secs = int(secs)
+    if secs <= 0:
+        return tr("d.now")
+    return tr("d.ago", t=fmt_dur(secs) if secs >= 60 else f"{secs} s")
+
+
+def add_hot(rect, fn):
+    _hot.append((QRectF(rect), fn))
+
+
+def tip_rect(rect, text):
+    add_hot(rect, lambda pos, t=text: t)
+
+
+def hot_text(hot, pos):
+    """Teks tooltip untuk posisi mouse; area yang digambar belakangan diprioritaskan."""
+    for rect, fn in reversed(hot):
+        if rect.contains(pos):
+            text = fn(pos)
+            if text:
+                return text
+    return None
+
+
 def draw_text(p, rect, text, size=9, color=None, weight=QFont.Normal, align=Qt.AlignLeft | Qt.AlignVCenter):
     p.setFont(font(size, weight))
     p.setPen(color or TEXT)
@@ -1885,6 +1951,7 @@ def draw_rows(p, rect, rows, row_h=19, value_ratio=0.45):
         glow_dot(p, rect.left() + 4, y + row_h / 2, 3.5, col)
         draw_text(p, QRectF(rect.left() + 14, y, rect.width() - vw - 18, row_h), name)
         draw_text(p, QRectF(rect.right() - vw, y, vw, row_h), value, color=col, align=Qt.AlignRight | Qt.AlignVCenter)
+        tip_rect(QRectF(rect.left(), y, rect.width(), row_h), f"{name}: {value}")
         y += row_h
     return y
 
@@ -1901,20 +1968,32 @@ def draw_donut(p, rect, slices, center="", sub=""):
         legend = QRectF(rect.left(), ring.bottom() + 8, rect.width(), rect.bottom() - ring.bottom() - 8)
     th = max(8.0, side * 0.15)
     arc = ring.adjusted(th / 2 + 2, th / 2 + 2, -th / 2 - 2, -th / 2 - 2)
+    total = sum(max(sl[1], 0) for sl in slices)
+    spans, acc = [], 0.0   # sudut searah jarum jam dari atas: (awal, akhir, label, teks, persen, warna)
+    for label, val, col, text in slices:
+        if total > 0 and val > 0:
+            deg = val / total * 360
+            spans.append((acc, acc + deg, label, text, val / total * 100, col))
+            acc += deg
+    ctr, r_out, r_in = arc.center(), arc.width() / 2 + th / 2, arc.width() / 2 - th / 2
+
+    def hit(pos):
+        dx, dy = pos.x() - ctr.x(), pos.y() - ctr.y()
+        if not r_in - 2 <= math.hypot(dx, dy) <= r_out + 2:
+            return None
+        ang = math.degrees(math.atan2(dx, -dy)) % 360
+        return next((sp for sp in spans if sp[0] <= ang < sp[1]), None)
+
+    hovered = hit(_hover) if _hover is not None else None
     p.save()
     p.setBrush(Qt.NoBrush)
     p.setPen(QPen(alpha(TRACK, 22), th))
     p.drawEllipse(arc)
-    total = sum(max(s[1], 0) for s in slices)
-    start = 90 * 16
-    for _, val, col, _ in slices:
-        if total <= 0 or val <= 0:
-            continue
-        span = -int(val / total * 360 * 16)
-        p.setPen(QPen(col, th, Qt.SolidLine, Qt.FlatCap))
-        p.drawArc(arc, start, span)
-        start += span
+    for sp in spans:
+        p.setPen(QPen(sp[5], th + (4 if sp is hovered else 0), Qt.SolidLine, Qt.FlatCap))
+        p.drawArc(arc, int((90 - sp[0]) * 16), -int((sp[1] - sp[0]) * 16))
     p.restore()
+    add_hot(ring, lambda pos: (lambda sp: f"{sp[2]}: {sp[3]} ({sp[4]:.1f}%)" if sp else None)(hit(pos)))
     big = 15 if arc.width() > 90 else 10
     draw_text(p, QRectF(arc.left(), arc.center().y() - big - 2, arc.width(), big * 2), center, big, TEXT, QFont.Bold, Qt.AlignCenter)
     if sub and arc.width() > 90:
@@ -1932,6 +2011,7 @@ def draw_hbars(p, rect, rows, row_h=24):
         draw_text(p, QRectF(rect.left(), y, lw - 6, row_h), label)
         draw_bar(p, QRectF(rect.left() + lw, y + row_h / 2 - 4, rect.width() - lw - tw - 8, 8), pct, col)
         draw_text(p, QRectF(rect.right() - tw, y, tw, row_h), text, color=col, align=Qt.AlignRight | Qt.AlignVCenter)
+        tip_rect(QRectF(rect.left(), y, rect.width(), row_h), f"{label}: {text} ({pct:.0f}%)")
         y += row_h
 
 
@@ -1947,11 +2027,13 @@ def draw_bar(p, rect, pct, color):
     p.restore()
 
 
-def draw_line(p, rect, series, ymax=None, fmt=lambda v: f"{v:.0f}", floor=1.0):
-    """Grafik garis dengan sumbu: series = [(data, warna, label)]; seri pertama diberi isi gradasi."""
+def draw_line(p, rect, series, ymax=None, fmt=lambda v: f"{v:.0f}", floor=1.0, dt=1):
+    """Grafik garis dengan sumbu: series = [(data, warna, label[, nama])]; seri pertama diberi isi gradasi.
+    dt = detik antar sampel (untuk teks "x detik lalu" pada tooltip)."""
     left = 52
     plot = QRectF(rect.left() + left, rect.top() + 6, rect.width() - left, rect.height() - 30)
-    peaks = [max(d) for d, _, _ in series if len(d)]
+    series = [(sr + (sr[2],))[:4] for sr in series]   # nama tooltip = label kalau tidak diberikan
+    peaks = [max(d) for d, _, _, _ in series if len(d)]
     top = ymax or max(peaks + [floor]) * 1.1
     p.save()
     for i in range(3):
@@ -1960,7 +2042,7 @@ def draw_line(p, rect, series, ymax=None, fmt=lambda v: f"{v:.0f}", floor=1.0):
         p.drawLine(QPointF(plot.left(), y), QPointF(plot.right(), y))
         draw_text(p, QRectF(rect.left(), y - 8, left - 6, 16), fmt(top * i / 2), 8, MUTED, align=Qt.AlignRight | Qt.AlignVCenter)
     step = plot.width() / (HISTORY - 1)
-    for idx, (data, col, _) in enumerate(series):
+    for idx, (data, col, _, _) in enumerate(series):
         pts = list(data)
         if not pts:
             continue
@@ -1981,8 +2063,24 @@ def draw_line(p, rect, series, ymax=None, fmt=lambda v: f"{v:.0f}", floor=1.0):
         p.setBrush(Qt.NoBrush)
         p.setPen(QPen(col, 1.8, Qt.SolidLine, Qt.RoundCap, Qt.RoundJoin))
         p.drawPath(line)
+    step_back = lambda pos: int(round((plot.right() - pos.x()) / step))   # sampel ke belakang dari yang terbaru
+
+    def line_tip(pos):
+        k = step_back(pos)
+        rows = [f"{name}: {fmt(d[len(d) - 1 - k])}" for d, _, _, name in series if 0 <= k < len(d)]
+        return "\n".join([fmt_ago(k * dt)] + rows) if rows else None
+
+    if _hover is not None and plot.adjusted(-step / 2, 0, step / 2, 0).contains(_hover):
+        k = step_back(_hover)
+        gx = plot.right() - k * step
+        p.setPen(QPen(alpha(TRACK, 70), 1, Qt.DotLine))
+        p.drawLine(QPointF(gx, plot.top()), QPointF(gx, plot.bottom()))
+        for d, col, _, _ in series:
+            if 0 <= k < len(d):
+                glow_dot(p, gx, plot.bottom() - plot.height() * min(d[len(d) - 1 - k] / top, 1), 3.5, col)
+    add_hot(QRectF(plot.left() - step / 2, rect.top(), plot.width() + step, rect.height() - 20), line_tip)
     x = plot.left()
-    for _, col, label in series:
+    for _, col, label, _ in series:
         if not label:
             continue
         glow_dot(p, x + 4, rect.bottom() - 7, 3.5, col)
@@ -2004,6 +2102,7 @@ def draw_gauge(p, rect, pct, text, sub="", color=None):
         p.setPen(QPen(color or OK, th, Qt.SolidLine, Qt.FlatCap))
         p.drawArc(arc, 180 * 16, int(-180 * 16 * max(0, min(pct, 100)) / 100))
     p.restore()
+    tip_rect(rect, f"{sub}: {text}" if sub else text)
     size = 15 if side > 110 else 11
     draw_text(p, QRectF(arc.left(), arc.center().y() - size * 2, arc.width(), size * 2), text, size, color or MUTED, QFont.Bold, Qt.AlignCenter)
     draw_text(p, QRectF(rect.left(), arc.center().y() + 4, rect.width(), 16), sub, 8, MUTED, align=Qt.AlignCenter)
@@ -2024,9 +2123,10 @@ def draw_stats(p, rect, items, cols=2):
             break
         draw_text(p, QRectF(x, y, cw - 8, 16), label, 8, MUTED)
         draw_text(p, QRectF(x, y + 16, cw - 8, 22), value, 11, col or TEXT, QFont.Bold)
+        tip_rect(QRectF(x, y, cw - 8, ch), f"{label}: {value}")
 
 
-def draw_strip(p, rect, hist):
+def draw_strip(p, rect, hist, dt=1):
     """Riwayat ketersediaan: satu kotak per sampel (hijau = hidup, merah = mati)."""
     ups = sum(1 for up, _ in hist if up)
     pct = ups / len(hist) * 100 if hist else 0
@@ -2040,7 +2140,11 @@ def draw_strip(p, rect, hist):
         j = len(hist) - HISTORY + i
         col = alpha(TRACK, 22) if j < 0 else (OK if hist[j][0] else CRIT)
         p.setBrush(col)
-        p.drawRoundedRect(QRectF(rect.left() + i * slot + 1, rect.top() + 24, slot - 2, h), 2, 2)
+        cell = QRectF(rect.left() + i * slot + 1, rect.top() + 24, slot - 2, h)
+        p.drawRoundedRect(cell, 2, 2)
+        if j >= 0:
+            up, ms = hist[j]
+            tip_rect(cell.adjusted(-1, 0, 1, 0), f"{fmt_ago((len(hist) - 1 - j) * dt)}\n{tr('svc.running') if up else tr('svc.down')} · {ms:.0f} ms")
     p.restore()
 
 
@@ -2055,10 +2159,26 @@ class Card(QWidget):
     def __init__(self, title, draw, min_h=150):
         super().__init__()
         self.title, self.draw = title, draw
+        self.hot, self.hover = [], None
+        self.setMouseTracking(True)
         self.setMinimumSize(230, min_h)
         self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
 
+    def mouseMoveEvent(self, e):
+        self.hover = QPointF(e.pos())
+        text = hot_text(self.hot, self.hover)
+        QToolTip.showText(e.globalPos(), text, self) if text else QToolTip.hideText()
+        self.update()
+
+    def leaveEvent(self, _):
+        self.hover = None
+        QToolTip.hideText()
+        self.update()
+
     def paintEvent(self, _):
+        global _hot, _hover
+        self.hot = _hot = []
+        _hover = self.hover
         p = QPainter(self)
         p.setRenderHint(QPainter.Antialiasing)
         r = QRectF(self.rect()).adjusted(0.5, 0.5, -0.5, -0.5)
@@ -2127,6 +2247,7 @@ class Dashboard(QWidget):
             f"QTabBar::tab {{ background: transparent; color: {MUTED.name()}; padding: 8px 10px; border-bottom: 2px solid transparent; }}"
             f"QTabBar::tab:hover {{ color: {TEXT.name()}; }}"
             f"QTabBar::tab:selected {{ color: {ACCENT.name()}; border-bottom: 2px solid {ACCENT.name()}; }}"
+            f"QToolTip {{ color: {TEXT.name()}; background-color: {BG_BOTTOM.name()}; border: 1px solid {ACCENT.name()}; padding: 4px; }}"
             f"QPushButton {{ color: {ACCENT.name()}; background: transparent; border: 1px solid {ACCENT.name()}; border-radius: 6px; padding: 8px; }}"
             f"QPushButton:hover {{ background: {alpha(ACCENT, 50).name(QColor.HexArgb)}; }}")
         self.tabs.setFont(font(10, QFont.Bold))
@@ -2198,7 +2319,7 @@ class Dashboard(QWidget):
 
         def cpu(p, r):
             avg = self.cpu_avg()
-            draw_line(p, r, [(avg, level_color(avg[-1] if avg else 0), "CPU %")], ymax=100, fmt=lambda v: f"{v:.0f}%")
+            draw_line(p, r, [(avg, level_color(avg[-1] if avg else 0), "CPU %", "CPU")], ymax=100, fmt=lambda v: f"{v:.0f}%", dt=w.interval)
 
         def mem(p, r):
             m = w.mem
@@ -2229,8 +2350,8 @@ class Dashboard(QWidget):
             draw_hbars(p, r, [(f"Core {i}", v, f"{v:.0f}%", level_color(v)) for i, v in enumerate(w.cpu_now)])
 
         def net(p, r):
-            draw_line(p, r, [(w.net_down, ACCENT, f"↓ {fmt_rate(w.net_rate[0])}"), (w.net_up, UPLOAD, f"↑ {fmt_rate(w.net_rate[1])}")],
-                      fmt=fmt_rate, floor=10_000)
+            draw_line(p, r, [(w.net_down, ACCENT, f"↓ {fmt_rate(w.net_rate[0])}", "↓ " + tr("d.down")), (w.net_up, UPLOAD, f"↑ {fmt_rate(w.net_rate[1])}", "↑ " + tr("d.up"))],
+                      fmt=fmt_rate, floor=10_000, dt=w.interval)
 
         def services(p, r):
             rows = self.service_rows()
@@ -2295,7 +2416,7 @@ class Dashboard(QWidget):
 
         def avg(p, r):
             a = self.cpu_avg()
-            draw_line(p, r, [(a, level_color(a[-1] if a else 0), "CPU %")], ymax=100, fmt=lambda v: f"{v:.0f}%")
+            draw_line(p, r, [(a, level_color(a[-1] if a else 0), "CPU %", "CPU")], ymax=100, fmt=lambda v: f"{v:.0f}%", dt=w.interval)
 
         def stats(p, r):
             try:
@@ -2313,7 +2434,7 @@ class Dashboard(QWidget):
         for i in range(w.ncpu):
             def core(p, r, i=i):
                 v = w.cpu_hist[i]
-                draw_line(p, r, [(v, level_color(v[-1]), f"{v[-1]:.0f}%")], ymax=100, fmt=lambda x: f"{x:.0f}%")
+                draw_line(p, r, [(v, level_color(v[-1]), f"{v[-1]:.0f}%", f"Core {i}")], ymax=100, fmt=lambda x: f"{x:.0f}%", dt=w.interval)
             self.card(g, f"Core {i}", core, 1 + i // 4, i % 4)
 
     # ----- memori -----
@@ -2329,7 +2450,7 @@ class Dashboard(QWidget):
                        f"{m.percent:.0f}%", fmt_bytes(m.total))
 
         def hist(p, r):
-            draw_line(p, r, [(w.ram_hist, level_color(w.mem.percent), "RAM %")], ymax=100, fmt=lambda v: f"{v:.0f}%")
+            draw_line(p, r, [(w.ram_hist, level_color(w.mem.percent), "RAM %", "RAM")], ymax=100, fmt=lambda v: f"{v:.0f}%", dt=w.interval)
 
         def stats(p, r):
             m = w.mem
@@ -2361,8 +2482,8 @@ class Dashboard(QWidget):
         w = self.w
 
         def lines(p, r):
-            draw_line(p, r, [(w.net_down, ACCENT, f"↓ {fmt_rate(w.net_rate[0])}"), (w.net_up, UPLOAD, f"↑ {fmt_rate(w.net_rate[1])}")],
-                      fmt=fmt_rate, floor=10_000)
+            draw_line(p, r, [(w.net_down, ACCENT, f"↓ {fmt_rate(w.net_rate[0])}", "↓ " + tr("d.down")), (w.net_up, UPLOAD, f"↑ {fmt_rate(w.net_rate[1])}", "↑ " + tr("d.up"))],
+                      fmt=fmt_rate, floor=10_000, dt=w.interval)
 
         def stats(p, r):
             net = w.poller.data.get("Internet")
@@ -2380,7 +2501,7 @@ class Dashboard(QWidget):
 
         def latency(p, r):
             h = w.svc_hist.get("Internet", [])
-            draw_line(p, r, [([ms if up else 0 for up, ms in h], ACCENT, "ms")], fmt=lambda v: f"{v:.0f}", floor=50)
+            draw_line(p, r, [([ms if up else 0 for up, ms in h], ACCENT, "ms", tr("d.latency_name"))], fmt=lambda v: f"{v:.0f} ms", floor=50, dt=w.poller.interval)
 
         def wifi(p, r):
             info = w.poller.data.get("WiFi") if w.is_wifi else None
@@ -2430,8 +2551,8 @@ class Dashboard(QWidget):
             draw_gauges(p, r, items) if items else draw_message(p, r, tr("smart.denied") if w.smart.data else tr("checking"))
 
         def io(p, r):
-            draw_line(p, r, [(w.nvme_r, ACCENT, "R " + fmt_rate(w.nvme_r[-1])), (w.nvme_w, UPLOAD, "W " + fmt_rate(w.nvme_w[-1]))],
-                      fmt=fmt_rate, floor=100_000)
+            draw_line(p, r, [(w.nvme_r, ACCENT, "R " + fmt_rate(w.nvme_r[-1]), tr("d.read")), (w.nvme_w, UPLOAD, "W " + fmt_rate(w.nvme_w[-1]), tr("d.write"))],
+                      fmt=fmt_rate, floor=100_000, dt=w.interval)
 
         def written(p, r):
             sm = smart()
@@ -2559,7 +2680,7 @@ class Dashboard(QWidget):
 
         def latency(p, r):
             h = w.svc_hist.get(name, [])
-            draw_line(p, r, [([ms if up else 0 for up, ms in h], ACCENT, "ms")], fmt=lambda v: f"{v:.0f}", floor=20)
+            draw_line(p, r, [([ms if up else 0 for up, ms in h], ACCENT, "ms", tr("d.latency_name"))], fmt=lambda v: f"{v:.0f} ms", floor=20, dt=w.poller.interval)
 
         def uptime(p, r):
             h = w.svc_hist.get(name, [])
@@ -2577,7 +2698,7 @@ class Dashboard(QWidget):
             draw_stats(p, r, items, 2)
 
         def strip(p, r):
-            draw_strip(p, r, list(w.svc_hist.get(name, [])))
+            draw_strip(p, r, list(w.svc_hist.get(name, [])), dt=w.poller.interval)
 
         self.card(g, tr_fn("d.status"), stats, 0, 0, 1, 1, 200)
         if name == "UFW":

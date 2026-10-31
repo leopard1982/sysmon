@@ -2,6 +2,14 @@
 
 Format mengikuti [Keep a Changelog](https://keepachangelog.com/id-ID/1.1.0/).
 
+## [1.15.0]
+### Ditambahkan
+- **Tooltip hover di semua chart** (dashboard dan widget desktop):
+  - grafik garis: garis penanda + nilai tiap seri pada titik itu dan "x detik lalu";
+  - donut/pie: irisan yang di-hover menebal dan menampilkan nama, nilai, dan persen;
+  - bar, meteran, petak statistik, legenda, dan baris layanan: nama lengkap dan nilai (berguna untuk teks yang terpotong);
+  - strip ketersediaan layanan: status dan latensi tiap sampel.
+
 ## [1.14.1]
 ### Diperbaiki
 - Donut **Penyimpanan** di Ringkasan dashboard menampilkan persen terlalu tinggi (47% padahal `df` 45%): blok cadangan root ikut dihitung terpakai. Persen kini `terpakai / (terpakai + tersedia)` seperti `df`, dan ada irisan **Cadangan root** supaya total cocok.

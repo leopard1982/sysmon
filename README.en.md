@@ -109,6 +109,7 @@ make lint         # lintian + .desktop validation
 ## 🖱️ Usage
 
 - **Drag** with the left mouse button to move the widget (position is saved).
+- **Hover** any chart to see its values (line charts show a guide line; donut slices show the percentage).
 - **Right-click** the widget or the tray icon for the menu.
 - The **dashboard** opens right away when the app starts. **Left-click the tray icon** to hide/show it; closing the window only hides it (the app stays in the tray).
 - The small desktop widget is optional: tick **Show desktop widget** in the menu.

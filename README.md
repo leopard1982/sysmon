@@ -113,6 +113,7 @@ make lint         # lintian + validasi .desktop
 ## 🖱️ Cara pakai
 
 - **Drag** dengan klik kiri untuk memindahkan widget (posisi tersimpan).
+- **Arahkan mouse** ke chart mana pun untuk melihat nilainya (grafik garis punya garis penanda; irisan donut menampilkan persen).
 - **Klik kanan** widget atau ikon tray untuk membuka menu.
 - **Dashboard** langsung tampil saat aplikasi dibuka. **Klik kiri ikon tray** untuk menyembunyikan/menampilkannya; menutup jendela hanya menyembunyikan (aplikasi tetap di tray).
 - Widget kecil di desktop bersifat opsional: centang **Tampilkan widget di desktop** di menu.
