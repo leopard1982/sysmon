@@ -10,8 +10,13 @@ import glob
 import http.client
 import json
 import os
+import pty
+import pwd
 import re
+import select
+import shlex
 import shutil
+import signal
 import socket
 import struct
 import subprocess
@@ -23,10 +28,10 @@ from collections import deque
 from datetime import datetime
 
 import psutil
-from PyQt5.QtCore import QDir, QLockFile, QPointF, QPropertyAnimation, QRectF, Qt, QTimer
+from PyQt5.QtCore import QDir, QLockFile, QPointF, QPropertyAnimation, QRectF, Qt, QTimer, pyqtSignal
 from PyQt5.QtGui import QBrush, QColor, QFont, QIcon, QImage, QLinearGradient, QRadialGradient, QPainter, QPainterPath, QPen, QPixmap
-from PyQt5.QtWidgets import (QAction, QActionGroup, QApplication, QGridLayout, QInputDialog, QMenu, QSizePolicy,
-                             QSystemTrayIcon, QTabWidget, QVBoxLayout, QWidget)
+from PyQt5.QtWidgets import (QAction, QActionGroup, QApplication, QGridLayout, QInputDialog, QLineEdit, QMenu,
+                             QMessageBox, QPushButton, QSizePolicy, QSystemTrayIcon, QTabWidget, QVBoxLayout, QWidget)
 
 CONFIG = os.path.expanduser("~/.config/desktop_htop.json")
 HISTORY = 60          # jumlah sampel grafik
@@ -229,6 +234,15 @@ I18N = {
     "d.images": ("Ukuran image", "Image sizes"),
     "d.img_use": ("Image dipakai", "Images in use"),
     "d.img_idle": ("Tidak dipakai", "Unused"),
+    "menu.smart_login": ('Izinkan baca SMART (login root)…', 'Allow SMART access (root login)…'),
+    "smart.login": ('Login root…', 'Root login…'),
+    "smart.login_title": ('Login root', 'Root login'),
+    "smart.login_prompt": ('Password root, untuk memberi izin baca SMART tanpa password berikutnya:', 'Root password, to allow reading SMART without a password from now on:'),
+    "smart.login_ok": ('Berhasil. SMART dimuat ulang.', 'Success. Reloading SMART.'),
+    "smart.login_fail": ('Gagal: {err}', 'Failed: {err}'),
+    "smart.login_wrong": ('password root salah (atau akun root dikunci)', 'wrong root password (or the root account is locked)'),
+    "smart.login_timeout": ('waktu habis', 'timed out'),
+    "smart.login_noscript": ('desktop-htop-smart-setup belum terpasang. Pasang paket .deb, atau jalankan skripnya dari folder packaging/usr/bin dengan sudo.', 'desktop-htop-smart-setup is not installed. Install the .deb package, or run the script from packaging/usr/bin with sudo.'),
     "legend.ok": ("Bagus", "Good"),
     "legend.warn": ("Hati-hati", "Caution"),
     "legend.crit": ("Tinggi", "High"),
@@ -691,17 +705,69 @@ def read_smart():
             "media": log.get("media_errors", 0), "model": model, "fw": fw}
 
 
+SMART_SETUP = "/usr/bin/desktop-htop-smart-setup"
+
+
+def su_run(password, command, timeout=20):
+    """Jalankan `command` sebagai root lewat `su` di pseudo-terminal (su menolak membaca password dari pipe).
+    Password hanya ditulis ke prompt su, tidak disimpan atau dicatat. Mengembalikan (berhasil, pesan)."""
+    pid, fd = pty.fork()
+    if pid == 0:   # proses anak: langsung exec
+        try:
+            os.execvpe("su", ["su", "-c", command, "root"], dict(os.environ, LC_ALL="C"))
+        finally:
+            os._exit(127)
+    out, sent, timed_out = b"", False, False
+    deadline = time.monotonic() + timeout
+    try:
+        while True:
+            if time.monotonic() > deadline:
+                timed_out = True
+                os.kill(pid, signal.SIGKILL)
+                break
+            if not select.select([fd], [], [], 0.2)[0]:
+                continue
+            try:
+                chunk = os.read(fd, 4096)
+            except OSError:   # EIO: anak sudah selesai
+                break
+            if not chunk:
+                break
+            out += chunk
+            if not sent and b"assword" in out:
+                os.write(fd, password.encode() + b"\n")
+                sent = True
+    finally:
+        os.close(fd)
+        _, status = os.waitpid(pid, 0)
+    if timed_out:
+        return False, tr("smart.login_timeout")
+    if os.WIFEXITED(status) and os.WEXITSTATUS(status) == 0:
+        return True, ""
+    lines = [ln.strip() for ln in out.decode(errors="replace").replace("\r", "\n").split("\n")
+             if ln.strip() and "assword" not in ln]
+    if not lines or "failure" in lines[-1].lower():
+        return False, tr("smart.login_wrong")
+    return False, lines[-1]
+
+
 class SmartPoller(threading.Thread):
     """SMART berubah pelan dan smartctl lambat: cek tiap 5 menit (1 menit selama masih gagal)."""
 
     def __init__(self):
         super().__init__(daemon=True)
         self.data = None
+        self.wake = threading.Event()
+
+    def reload(self):
+        self.data = None
+        self.wake.set()
 
     def run(self):
         while True:
             self.data = read_smart()
-            time.sleep(60 if "error" in self.data else 300)
+            self.wake.wait(60 if "error" in self.data else 300)
+            self.wake.clear()
 
 
 def read_battery():
@@ -823,6 +889,8 @@ def set_autostart(on):
 
 
 class Widget(QWidget):
+    smartLoginDone = pyqtSignal(bool, str)   # hasil login root (dari thread kerja ke UI)
+
     def __init__(self):
         super().__init__()
         self.cfg = load_config()
@@ -870,6 +938,9 @@ class Widget(QWidget):
         self.os_name = read_os_name()
         self.smart = SmartPoller()
         self.smart.start()
+        self.smart_btn = None             # area tombol login root (diisi saat paint)
+        self._smart_login_busy = False
+        self.smartLoginDone.connect(self.on_smart_login)
         self.nvme_parts = []
         self.nvme_io = None          # (read B/s, write B/s, busy %)
         self.nvme_r = deque([0] * HISTORY, maxlen=HISTORY)
@@ -934,6 +1005,34 @@ class Widget(QWidget):
         self.dashboard.raise_()
         self.dashboard.activateWindow()
 
+    def ask_smart_login(self):
+        """Minta password root, jalankan desktop-htop-smart-setup sebagai root, lalu muat ulang SMART."""
+        if self._smart_login_busy:
+            return
+        if not find_smartctl():
+            QMessageBox.warning(None, tr("smart.login_title"), f"{tr('smart.missing')}\n{tr('smart.missing.hint')}")
+            return
+        if not os.path.exists(SMART_SETUP):
+            QMessageBox.warning(None, tr("smart.login_title"), tr("smart.login_noscript"))
+            return
+        password, ok = QInputDialog.getText(None, tr("smart.login_title"), tr("smart.login_prompt"), QLineEdit.Password)
+        if not ok or not password:
+            return
+        command = f"{shlex.quote(SMART_SETUP)} --user {shlex.quote(pwd.getpwuid(os.getuid()).pw_name)}"
+        self._smart_login_busy = True
+
+        def work():
+            self.smartLoginDone.emit(*su_run(password, command))
+        threading.Thread(target=work, daemon=True).start()
+
+    def on_smart_login(self, ok, err):
+        self._smart_login_busy = False
+        if ok:
+            self.smart.reload()
+            QMessageBox.information(None, tr("smart.login_title"), tr("smart.login_ok"))
+        else:
+            QMessageBox.warning(None, tr("smart.login_title"), tr("smart.login_fail", err=err))
+
     def toggle_visible(self):
         self.setVisible(not self.isVisible())
 
@@ -942,6 +1041,8 @@ class Widget(QWidget):
         m.addAction(APP_NAME).setEnabled(False)
         m.addSeparator()
         m.addAction(tr("menu.dashboard")).triggered.connect(self.open_dashboard)
+        if (self.smart.data or {}).get("error") == "smart.denied":
+            m.addAction(tr("menu.smart_login")).triggered.connect(self.ask_smart_login)
         m.addAction(tr("menu.toggle")).triggered.connect(self.toggle_visible)
         lock = QAction(tr("menu.lock"), m, checkable=True, checked=self.locked)
         lock.toggled.connect(self.set_locked)
@@ -1150,6 +1251,7 @@ class Widget(QWidget):
         p.drawImage(0, 0, layer)
 
     def paint_content(self, p):
+        self.smart_btn = None
         lx, colw = 16, COLW
         rx = lx + COLW + 24
         cx = rx + COLW + 24
@@ -1497,7 +1599,16 @@ class Widget(QWidget):
         if "error" in sm:
             y = self.docker_message(p, x, y, w, tr(sm["error"]), CRIT if sm["error"] != "smart.missing" else WARN)
             hint = sm["error"] + ".hint"
-            return self.docker_message(p, x, y, w, tr(hint)) if hint in I18N else y
+            if hint in I18N:
+                y = self.docker_message(p, x, y, w, tr(hint))
+            if sm["error"] == "smart.denied":   # tombol login root
+                self.smart_btn = QRectF(x, y + 2, 150, 24)
+                p.setPen(QPen(ACCENT, 1))
+                p.setBrush(alpha(ACCENT, 45))
+                p.drawRoundedRect(self.smart_btn, 6, 6)
+                draw_text(p, self.smart_btn, tr("smart.login"), 9, ACCENT, QFont.Bold, Qt.AlignCenter)
+                y += 30
+            return y
         bad = not sm["passed"] or sm["crit"]
         spare, thr = sm["spare"], sm["spare_thr"] or 0
         used = sm["used"] or 0
@@ -1597,6 +1708,9 @@ class Widget(QWidget):
 
     # ---------- interaksi ----------
     def mousePressEvent(self, e):
+        if e.button() == Qt.LeftButton and self.smart_btn and self.smart_btn.contains(QPointF(e.pos())):
+            self.ask_smart_login()
+            return
         if e.button() == Qt.LeftButton and not self.locked:
             self.drag = e.globalPos() - self.frameGeometry().topLeft()
 
@@ -1960,6 +2074,7 @@ class Dashboard(QWidget):
         lay.setContentsMargins(12, 10, 12, 12)
         lay.addWidget(self.tabs)
         self.tab_keys = []   # (kunci, fungsi judul)
+        self.smart_btn = None
         pages = [("overview", lambda: tr("tab.overview"), self.page_overview),
                  ("cpu", lambda: "CPU", self.page_cpu),
                  ("memory", lambda: tr("tab.memory"), self.page_memory),
@@ -1996,7 +2111,9 @@ class Dashboard(QWidget):
             "QTabBar { background: transparent; }"
             f"QTabBar::tab {{ background: transparent; color: {MUTED.name()}; padding: 8px 10px; border-bottom: 2px solid transparent; }}"
             f"QTabBar::tab:hover {{ color: {TEXT.name()}; }}"
-            f"QTabBar::tab:selected {{ color: {ACCENT.name()}; border-bottom: 2px solid {ACCENT.name()}; }}")
+            f"QTabBar::tab:selected {{ color: {ACCENT.name()}; border-bottom: 2px solid {ACCENT.name()}; }}"
+            f"QPushButton {{ color: {ACCENT.name()}; background: transparent; border: 1px solid {ACCENT.name()}; border-radius: 6px; padding: 8px; }}"
+            f"QPushButton:hover {{ background: {alpha(ACCENT, 50).name(QColor.HexArgb)}; }}")
         self.tabs.setFont(font(10, QFont.Bold))
         self.update()
 
@@ -2022,6 +2139,9 @@ class Dashboard(QWidget):
         for i, (key, title) in enumerate(self.tab_keys):
             self.tabs.setTabText(i, title())
             self.tabs.setTabVisible(i, self.tab_visible(key))
+        denied = (self.w.smart.data or {}).get("error") == "smart.denied"
+        self.smart_btn.setVisible(denied)
+        self.smart_btn.setText(tr("smart.login_title") + " — " + tr("smart.denied"))
         page = self.tabs.currentWidget()
         if page:
             for card in page.findChildren(Card):
@@ -2324,6 +2444,9 @@ class Dashboard(QWidget):
         self.card(g, tr_fn("d.io"), io, 1, 0, 1, 2, 220)
         self.card(g, tr_fn("d.partitions"), parts, 1, 2, 1, 2, 220)
         self.card(g, tr_fn("sec.smart"), smart_stats, 2, 0, 1, 4, 130)
+        self.smart_btn = QPushButton()
+        self.smart_btn.clicked.connect(w.ask_smart_login)
+        g.addWidget(self.smart_btn, 3, 0, 1, 4)
 
     # ----- baterai -----
     def page_battery(self, g):

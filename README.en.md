@@ -179,7 +179,7 @@ Service checks run in a background thread and only for services that are shown, 
 ## ⚠️ Limitations
 
 - Tested on **Debian 13 + KDE Plasma (X11)**. On Wayland, "below all windows" placement may behave differently.
-- NVMe **SMART** needs root. Once `smartmontools` is installed, run `sudo desktop-htop-smart-setup` once (adds a narrow sudoers rule for one read-only command; revoke with `--remove`). `/dev/nvme0` only.
+- NVMe **SMART** needs root. Once `smartmontools` is installed, click the **Root login…** button in the SMART section (enter the root password; it is not stored), or run `sudo desktop-htop-smart-setup` once (adds a narrow sudoers rule for one read-only command; revoke with `--remove`). `/dev/nvme0` only.
 - Install age is an estimate from the filesystem / installer log creation time.
 - Docker: no per-container CPU/memory yet.
 - Database process count and memory are matched by local process name; a database inside a Docker container only shows its port status.
@@ -191,7 +191,7 @@ Service checks run in a background thread and only for services that are shown, 
 | Widget is not visible | It sits below all windows. Show the desktop or click the tray icon |
 | No tray icon | Make sure *System Tray* is enabled in your panel |
 | SMART: "smartctl is not installed" | `sudo apt install smartmontools` |
-| SMART: "root access needed" | `sudo desktop-htop-smart-setup` |
+| SMART: "root access needed" | Click **Root login…** and enter the root password, or run `sudo desktop-htop-smart-setup`. If the root account is locked (Ubuntu), use `sudo desktop-htop-smart-setup` |
 | Docker: "permission denied" | `sudo usermod -aG docker $USER`, then log in again |
 | Stale launcher icon | `kbuildsycoca6 --noincremental` or log in again |
 | Won't autostart | Check **Start automatically at login** in the menu |

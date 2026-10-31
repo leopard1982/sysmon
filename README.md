@@ -183,7 +183,7 @@ Pengecekan layanan jalan di thread terpisah dan hanya untuk layanan yang ditampi
 ## ⚠️ Batasan
 
 - Diuji di **Debian 13 + KDE Plasma (X11)**. Di Wayland, penempatan window "di bawah semua window" bisa berbeda.
-- **SMART** NVMe butuh akses root. Setelah `smartmontools` terpasang, jalankan sekali `sudo desktop-htop-smart-setup` (menambah aturan sudoers sempit untuk satu perintah baca; cabut dengan `--remove`). Hanya `/dev/nvme0`.
+- **SMART** NVMe butuh akses root. Setelah `smartmontools` terpasang, klik tombol **Login root…** di bagian SMART (isi password root; tidak disimpan), atau jalankan sekali `sudo desktop-htop-smart-setup` (menambah aturan sudoers sempit untuk satu perintah baca; cabut dengan `--remove`). Hanya `/dev/nvme0`.
 - Usia instalasi adalah perkiraan dari waktu pembuatan filesystem/log installer.
 - Docker: belum menampilkan CPU/memori per container.
 - Jumlah proses & memori database dihitung dari nama proses lokal; database di dalam container Docker hanya terlihat statusnya lewat port.
@@ -197,7 +197,7 @@ Pengecekan layanan jalan di thread terpisah dan hanya untuk layanan yang ditampi
 | Docker: "akses ditolak" | `sudo usermod -aG docker $USER`, lalu login ulang |
 | Ikon launcher lama | `kbuildsycoca6 --noincremental` atau login ulang |
 | SMART: "smartctl belum terpasang" | `sudo apt install smartmontools` |
-| SMART: "butuh izin root" | `sudo desktop-htop-smart-setup` |
+| SMART: "butuh izin root" | Klik **Login root…** dan isi password root, atau `sudo desktop-htop-smart-setup`. Kalau akun root dikunci (Ubuntu), pakai `sudo desktop-htop-smart-setup` |
 | Tidak mau autostart | Cek centang **Jalankan otomatis saat login** di menu |
 
 ## 🗺️ Rencana

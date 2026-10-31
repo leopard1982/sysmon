@@ -1,7 +1,12 @@
 #!/bin/sh
 # Izinkan user memanggil `smartctl` (hanya perintah baca SMART NVMe) tanpa password, supaya
-# widget bisa menampilkan SMART. Opt-in; hapus lagi dengan: sudo desktop-htop-smart-setup --remove
+# widget bisa menampilkan SMART. Opt-in.
+#   sudo desktop-htop-smart-setup            -> untuk user yang menjalankan sudo
+#   desktop-htop-smart-setup --user NAMA     -> sebagai root (dipakai tombol login root di widget)
+#   sudo desktop-htop-smart-setup --remove   -> cabut izin
 set -eu
+PATH=/usr/sbin:/usr/bin:/sbin:/bin
+export PATH
 
 FILE=/etc/sudoers.d/desktop-htop-smart
 
@@ -13,8 +18,15 @@ if [ "${1:-}" = "--remove" ]; then
     exit 0
 fi
 
-USER_NAME="${SUDO_USER:-}"
-[ -n "$USER_NAME" ] && [ "$USER_NAME" != root ] || { echo "Jalankan lewat sudo dari akun biasa (bukan root langsung)." >&2; exit 1; }
+if [ "${1:-}" = "--user" ]; then
+    USER_NAME="${2:-}"
+else
+    USER_NAME="${SUDO_USER:-}"
+fi
+case "$USER_NAME" in
+    ""|root|*[!a-z0-9_-]*|[!a-z_]*) echo "Nama user tidak valid. Jalankan lewat sudo dari akun biasa, atau pakai --user NAMA." >&2; exit 1 ;;
+esac
+id -u "$USER_NAME" >/dev/null 2>&1 || { echo "User tidak ditemukan: $USER_NAME" >&2; exit 1; }
 
 SMARTCTL=/usr/sbin/smartctl
 [ -x "$SMARTCTL" ] || { echo "smartctl belum terpasang: sudo apt install smartmontools" >&2; exit 1; }

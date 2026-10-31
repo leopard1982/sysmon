@@ -2,6 +2,11 @@
 
 Format mengikuti [Keep a Changelog](https://keepachangelog.com/id-ID/1.1.0/).
 
+## [1.13.0]
+### Ditambahkan
+- Tombol **Login root…** saat SMART ditolak (di widget, menu klik kanan, dan tab NVMe dashboard): masukkan password root, izin baca SMART diberikan lewat `su` + `desktop-htop-smart-setup`, lalu SMART langsung dimuat ulang. Password hanya dikirim ke `su`, tidak disimpan.
+- `desktop-htop-smart-setup --user NAMA` (dipanggil sebagai root); nama user divalidasi.
+
 ## [1.12.0]
 ### Ditambahkan
 - **Dashboard** (menu klik kanan / tray → *Buka Dashboard*): tab **Ringkasan** berisi pie/donut, bar, grafik garis, dan meteran (CPU, memori, penyimpanan, jaringan, status layanan, suhu, kesehatan, Docker).
