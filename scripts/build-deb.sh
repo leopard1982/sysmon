@@ -10,6 +10,7 @@ OUT="$ROOT/dist"
 
 rm -rf "$STAGE"
 mkdir -p "$STAGE" "$OUT"
+rm -f "$OUT/${PKG}"_*_all.deb   # dist/ hanya menyimpan .deb terbaru
 cp -r "$ROOT/packaging/." "$STAGE/"
 sed -i "s/@VERSION@/$VERSION/" "$STAGE/DEBIAN/control"
 
