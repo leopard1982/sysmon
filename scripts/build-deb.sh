@@ -30,7 +30,7 @@ DOC="$STAGE/usr/share/doc/$PKG"
 
 find "$STAGE" -type d -exec chmod 755 {} +
 find "$STAGE" -type f -exec chmod 644 {} +
-chmod 755 "$STAGE/usr/bin/desktop-htop" "$STAGE/usr/lib/desktop-htop/htop_widget.py"
+chmod 755 "$STAGE/usr/bin/desktop-htop" "$STAGE/usr/bin/desktop-htop-smart-setup" "$STAGE/usr/lib/desktop-htop/htop_widget.py"
 
 dpkg-deb --build --root-owner-group "$STAGE" "$OUT/${PKG}_${VERSION}_all.deb"
 echo "OK -> $OUT/${PKG}_${VERSION}_all.deb"

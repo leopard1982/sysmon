@@ -2,6 +2,18 @@
 
 Format mengikuti [Keep a Changelog](https://keepachangelog.com/id-ID/1.1.0/).
 
+## [1.11.0]
+### Ditambahkan
+- **SMART NVMe** (kesehatan, cadangan, keausan, data ditulis/dibaca, jam nyala, siklus daya, shutdown tak aman) lewat `smartctl`. `smartmontools` menjadi paket rekomendasi; `sudo desktop-htop-smart-setup` memberi izin baca SMART tanpa password (opt-in).
+- **Model & firmware SSD NVMe** ditampilkan jelas.
+- **Kesehatan baterai** (kapasitas penuh vs desain, siklus, daya, model).
+- **Usia instalasi Linux** (dari folder installer / pembuatan filesystem root).
+- Monitor **Nginx**, **Apache**, dan **UFW** (disembunyikan otomatis kalau tidak terpasang).
+- Opsi **Tampilkan di atas** (selalu di depan window lain).
+### Diubah
+- "Tema tulisan" menjadi **Tema**: tiap tema membawa warna background dan teks yang serasi (Default, Hitam, Biru, Hijau Matrix, Amber, Ungu, Merah, Terang). Tema lama `Gelap` menjadi `Terang`, `Putih` menjadi `Default`.
+- Tata letak 4 kolom (NVMe, SMART, baterai, sistem di kolom ke-3; Docker di kolom ke-4). Baterai pindah dari daftar sensor ke bagian sendiri.
+
 ## [1.10.0]
 ### Ditambahkan
 - Pilihan bahasa **Indonesia / English** dari menu klik kanan (bahasa awal mengikuti locale sistem).

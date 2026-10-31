@@ -11,13 +11,16 @@ import http.client
 import json
 import os
 import re
+import shutil
 import socket
 import struct
 import subprocess
 import sys
 import threading
 import time
+from calendar import monthrange
 from collections import deque
+from datetime import datetime
 
 import psutil
 from PyQt5.QtCore import QDir, QLockFile, QPointF, QPropertyAnimation, QRectF, Qt, QTimer
@@ -29,8 +32,8 @@ HISTORY = 60          # jumlah sampel grafik
 INTERVALS = ((1, "iv1"), (5, "iv5"), (30, "iv30"), (60, "iv60"))   # (detik, kunci terjemahan)
 APP_NAME = "System Monitoring"
 COLW = 296
-W, H = 16 + 3 * COLW + 2 * 24 + 16, 630
-W2 = 16 + 2 * COLW + 24 + 16   # lebar tanpa kolom Docker
+W, H = 16 + 4 * COLW + 3 * 24 + 16, 660
+W2 = 16 + 3 * COLW + 2 * 24 + 16   # lebar tanpa kolom Docker
 DOCKER_SOCK = "/var/run/docker.sock"
 DOCKER_MAX_ROWS = 10
 NVME_DEV = "nvme0n1"
@@ -46,16 +49,22 @@ MUTED = QColor("#90a4ae")
 UPLOAD = QColor("#ba68c8")
 SHADOW = QColor(0, 0, 0, 200)
 
-# Tema tulisan: hanya warna teks/judul/grafik; warna status (hijau/kuning/merah) tetap.
+# Tema: warna background (atas, bawah) + warna teks/judul/grafik yang serasi dengannya.
+# Warna status (hijau/kuning/merah) tetap, kecuali tema terang yang memakai versi lebih gelap.
 THEMES = {
-    "Default":       dict(text="#eceff1", muted="#90a4ae", accent="#4fc3f7", upload="#ba68c8", shadow="#000000"),
-    "Putih":         dict(text="#ffffff", muted="#cfd8dc", accent="#ffffff", upload="#e0e0e0", shadow="#000000"),
-    "Gelap":         dict(text="#102027", muted="#37474f", accent="#01579b", upload="#6a1b9a", shadow="#ffffff",
-                          ok="#2e7d32", warn="#e65100", crit="#c62828"),
-    "Hijau (Matrix)": dict(text="#b9f6ca", muted="#69a77f", accent="#00e676", upload="#76ff03", shadow="#000000"),
-    "Amber":         dict(text="#ffe0b2", muted="#bf9b6b", accent="#ffab40", upload="#ff7043", shadow="#000000"),
-    "Ungu":          dict(text="#f3e5f5", muted="#b39ddb", accent="#ce93d8", upload="#80d8ff", shadow="#000000"),
+    "Default":        dict(bg=("#1e2838", "#080c14"), text="#eceff1", muted="#90a4ae", accent="#4fc3f7", upload="#ba68c8", shadow="#000000"),
+    "Hitam":          dict(bg=("#161616", "#000000"), text="#f5f5f5", muted="#9e9e9e", accent="#b0bec5", upload="#ce93d8", shadow="#000000"),
+    "Biru":           dict(bg=("#16325c", "#060f24"), text="#e3f2fd", muted="#8fb3d9", accent="#64b5f6", upload="#f48fb1", shadow="#000000"),
+    "Hijau (Matrix)": dict(bg=("#0c2a1c", "#020a06"), text="#b9f6ca", muted="#69a77f", accent="#00e676", upload="#76ff03", shadow="#000000"),
+    "Amber":          dict(bg=("#33210a", "#0e0802"), text="#ffe0b2", muted="#bf9b6b", accent="#ffab40", upload="#ff7043", shadow="#000000"),
+    "Ungu":           dict(bg=("#32204f", "#0f0820"), text="#f3e5f5", muted="#b39ddb", accent="#ce93d8", upload="#80d8ff", shadow="#000000"),
+    "Merah":          dict(bg=("#4a1a1f", "#1a080b"), text="#ffebee", muted="#c99aa0", accent="#ff8a80", upload="#ffd180", shadow="#000000"),
+    "Terang":         dict(bg=("#f5f7fa", "#cfd8dc"), text="#102027", muted="#455a64", accent="#01579b", upload="#6a1b9a", shadow="#ffffff",
+                           ok="#2e7d32", warn="#e65100", crit="#c62828", light=True),
 }
+THEME_ALIAS = {"Gelap": "Terang", "Putih": "Default"}   # nama dari versi lama
+BG_TOP, BG_BOTTOM = QColor("#1e2838"), QColor("#080c14")
+TRACK = QColor("#ffffff")   # warna lapisan tipis (jalur grafik/bar, garis); hitam di tema terang
 FONTS = {"Sans": "Sans", "Monospace": "Monospace", "Serif": "Serif"}
 FONT_FAMILY = "Sans"
 FX = True   # efek visual: glow, gradasi
@@ -69,6 +78,7 @@ I18N = {
     # menu
     "menu.toggle": ("Tampilkan / sembunyikan widget", "Show / hide widget"),
     "menu.lock": ("Kunci posisi", "Lock position"),
+    "menu.top": ("Tampilkan di atas (selalu di depan)", "Show on top (always in front)"),
     "menu.bg": ("Tampilkan background", "Show background"),
     "menu.opacity": ("Transparansi background", "Background opacity"),
     "op.light": ("Tipis", "Light"),
@@ -79,7 +89,7 @@ I18N = {
     "menu.port": ("Port: {port} (ubah…)", "Port: {port} (change…)"),
     "menu.docker": ("Docker (tampilkan)", "Docker (show)"),
     "menu.fx": ("Efek visual (glow)", "Visual effects (glow)"),
-    "menu.theme": ("Tema tulisan", "Text theme"),
+    "menu.theme": ("Tema", "Theme"),
     "menu.font": ("Jenis font", "Font"),
     "menu.interval": ("Interval update", "Update interval"),
     "menu.lang": ("Bahasa / Language", "Language / Bahasa"),
@@ -98,6 +108,9 @@ I18N = {
     "sec.sensors": ("SENSOR", "SENSORS"),
     "sec.containers": ("CONTAINER", "CONTAINERS"),
     "sec.images": ("IMAGE", "IMAGES"),
+    "sec.battery": ("BATERAI", "BATTERY"),
+    "sec.system": ("SISTEM", "SYSTEM"),
+    "sec.smart": ("SMART NVMe", "NVMe SMART"),
     # isi
     "checking": ("memeriksa…", "checking…"),
     "mem.avail": ("tersedia {size}", "available {size}"),
@@ -120,7 +133,36 @@ I18N = {
     "svc.noresp": ("tidak merespons", "not responding"),
     "nvme.temp": ("Suhu", "Temp"),
     "sensors.none": ("sensor tidak terdeteksi", "no sensors detected"),
-    "battery": ("baterai", "battery"),
+    "bat.full": ("penuh", "full"),
+    "bat.cap": ("Kapasitas", "Charge"),
+    "bat.health": ("Kesehatan", "Health"),
+    "bat.cycles": ("Siklus", "Cycles"),
+    "bat.power": ("Daya", "Power"),
+    "ufw.active": ("aktif", "active"),
+    "ufw.inactive": ("nonaktif", "inactive"),
+    "ufw.policy": ("masuk {i} · keluar {o}", "in {i} · out {o}"),
+    "ufw.rules": (" · {n} aturan", " · {n} rules"),
+    "smart.missing": ("smartctl belum terpasang", "smartctl is not installed"),
+    "smart.missing.hint": ("sudo apt install smartmontools", "sudo apt install smartmontools"),
+    "smart.denied": ("butuh izin root untuk membaca SMART", "root access needed to read SMART"),
+    "smart.denied.hint": ("sudo desktop-htop-smart-setup", "sudo desktop-htop-smart-setup"),
+    "smart.fail": ("gagal membaca SMART", "could not read SMART"),
+    "smart.health": ("Kesehatan", "Health"),
+    "smart.spare": ("Cadangan", "Spare"),
+    "smart.wear": ("Keausan", "Wear"),
+    "smart.rw": ("Tulis / baca", "Write / read"),
+    "smart.poh": ("Waktu nyala", "Power on"),
+    "smart.poh.val": ("{h} jam · {d} hari", "{h} h · {d} d"),
+    "smart.cyc": ("Nyala · mati paksa", "Cycles · unsafe"),
+    "smart.media": ("Error media", "Media errors"),
+    "nvme.model": ("Model", "Model"),
+    "sys.age": ("Usia instalasi", "Install age"),
+    "sys.since": ("sejak {date}", "since {date}"),
+    "sys.unknown": ("tidak diketahui", "unknown"),
+    "age.y": ("{n} thn", "{n} yr"),
+    "age.m": ("{n} bln", "{n} mo"),
+    "age.d": ("{n} hr", "{n} d"),
+    "age.h": ("{n} jam", "{n} h"),
     "bat.charging": ("mengisi daya", "charging"),
     "bat.discharging": ("memakai baterai", "discharging"),
     "legend.ok": ("Bagus", "Good"),
@@ -128,7 +170,8 @@ I18N = {
     "legend.crit": ("Tinggi", "High"),
 }
 
-THEME_EN = {"Putih": "White", "Gelap": "Dark", "Hijau (Matrix)": "Green (Matrix)", "Ungu": "Purple"}
+THEME_EN = {"Hitam": "Black", "Biru": "Blue", "Hijau (Matrix)": "Green (Matrix)", "Ungu": "Purple",
+            "Merah": "Red", "Terang": "Light"}
 
 
 def tr(key, **kw):
@@ -146,10 +189,12 @@ def detect_lang():
 
 
 def apply_theme(name):
-    global TEXT, MUTED, ACCENT, UPLOAD, SHADOW, OK, WARN, CRIT
+    global TEXT, MUTED, ACCENT, UPLOAD, SHADOW, OK, WARN, CRIT, BG_TOP, BG_BOTTOM, TRACK
     t = THEMES.get(name, THEMES["Default"])
     OK, WARN, CRIT = (QColor(t.get(k, d)) for k, d in (("ok", "#81c784"), ("warn", "#ffeb3b"), ("crit", "#e57373")))
     TEXT, MUTED, ACCENT, UPLOAD = (QColor(t[k]) for k in ("text", "muted", "accent", "upload"))
+    BG_TOP, BG_BOTTOM = (QColor(c) for c in t["bg"])
+    TRACK = QColor("#000000" if t.get("light") else "#ffffff")
     SHADOW = QColor(t["shadow"])
     SHADOW.setAlpha(200)
 
@@ -311,6 +356,52 @@ def probe_redis(host="127.0.0.1", port=6379):
     return {"up": True, "ms": ms, "version": version}
 
 
+def probe_web(port, pattern, host="127.0.0.1"):
+    """HEAD / ke web server lokal; versi dibaca dari header Server (kalau tidak disembunyikan)."""
+    t0 = time.monotonic()
+    try:
+        with socket.create_connection((host, port), timeout=1) as c:
+            c.settimeout(1)
+            c.sendall(b"HEAD / HTTP/1.0\r\nHost: localhost\r\nConnection: close\r\n\r\n")
+            data = c.recv(2048)
+    except OSError:
+        return {"up": False}
+    ms = (time.monotonic() - t0) * 1000
+    if not data.startswith(b"HTTP/"):
+        return {"up": False}
+    m = re.search(pattern, data, re.I)
+    return {"up": True, "ms": ms, "version": "v" + m.group(1).decode() if m else f"port {port}"}
+
+
+def probe_nginx(port=80):
+    return probe_web(port, rb"Server:\s*nginx/([\d.]+)")
+
+
+def probe_apache(port=80):
+    return probe_web(port, rb"Server:\s*Apache/([\d.]+)")
+
+
+def probe_ufw(port=None):
+    """Status UFW tanpa root: ENABLED di /etc/ufw/ufw.conf dan kebijakan bawaan di /etc/default/ufw."""
+    if not any(os.path.exists(f) for f in ("/usr/sbin/ufw", "/etc/ufw")):
+        return {"up": False, "absent": True}
+    conf = read_sysfs("/etc/ufw/ufw.conf")
+    m = re.search(r"^ENABLED=(\w+)", conf, re.M)
+    if m:
+        enabled = m.group(1).lower() == "yes"
+    else:   # ufw.conf tidak terbaca: tanya systemd
+        try:
+            enabled = subprocess.run(["systemctl", "is-active", "--quiet", "ufw"], timeout=2).returncode == 0
+        except (OSError, subprocess.SubprocessError):
+            enabled = False
+    default = read_sysfs("/etc/default/ufw")
+    pol = {k: (re.search(rf'^DEFAULT_{k}_POLICY="?(\w+)', default, re.M) or [None, "?"])[1] for k in ("INPUT", "OUTPUT")}
+    rules = read_sysfs("/etc/ufw/user.rules")   # biasanya hanya root yang boleh baca
+    return {"up": enabled, "ms": 0, "up_key": "ufw.active", "down_key": "ufw.inactive",
+            "policy": (pol["INPUT"], pol["OUTPUT"]),
+            "rules": rules.count("### tuple ###") if rules else None}
+
+
 class _UnixHTTP(http.client.HTTPConnection):
     def __init__(self, path, timeout=2):
         super().__init__("localhost", timeout=timeout)
@@ -413,7 +504,16 @@ SERVICES = (
     ("MariaDB", probe_mariadb, {"mariadbd", "mysqld"}, 3306),
     ("MongoDB", probe_mongodb, {"mongod", "mongos"}, 27017),
     ("Redis", probe_redis, {"redis-server"}, 6379),
+    ("Nginx", probe_nginx, {"nginx"}, 80),
+    ("Apache", probe_apache, {"apache2", "httpd"}, 80),
+    ("UFW", probe_ufw, set(), None),
 )
+# Layanan opsional: baris disembunyikan kalau tidak terpasang.
+INSTALLED = {
+    "Nginx": ("/usr/sbin/nginx", "/etc/nginx"),
+    "Apache": ("/usr/sbin/apache2", "/usr/sbin/httpd", "/etc/apache2", "/etc/httpd"),
+}
+PROC_REQUIRED = {"Nginx", "Apache"}   # port 80 bisa dipakai server lain, jadi proses harus ada
 
 
 class ServicePoller(threading.Thread):
@@ -433,8 +533,13 @@ class ServicePoller(threading.Thread):
                 conf = self.config.get(key, {})
                 if not conf.get("show", True):
                     continue
+                if key in INSTALLED and not any(os.path.exists(f) for f in INSTALLED[key]):
+                    res[key] = {"up": False, "absent": True}
+                    continue
                 info = probe(port=conf.get("port", default_port))
-                info["procs"], info["rss"] = proc_stats(names)
+                info["procs"], info["rss"] = proc_stats(names) if names else (0, 0)
+                if key in PROC_REQUIRED and not info["procs"]:
+                    info["up"] = False
                 res[key] = info
             if self.config.get("Docker", {}).get("show", True):
                 res["Docker"] = read_docker()
@@ -483,6 +588,117 @@ def read_nvme_info():
             info["high"] = int(hi) / 1000 if hi.isdigit() else None
             break
     return info
+
+
+def find_smartctl():
+    if os.access("/usr/sbin/smartctl", os.X_OK):
+        return "/usr/sbin/smartctl"
+    return shutil.which("smartctl", path=os.pathsep.join([os.environ.get("PATH", ""), "/usr/sbin", "/sbin", "/usr/local/sbin"]))
+
+
+def read_smart():
+    """SMART/Health NVMe lewat smartctl (JSON). Coba langsung, lalu `sudo -n` (lihat desktop-htop-smart-setup)."""
+    exe = find_smartctl()
+    if not exe:
+        return {"error": "smart.missing"}
+    dev = f"/dev/{NVME_CTRL}"
+    if not os.path.exists(dev):
+        return {"error": "smart.fail"}
+    log = status = model = fw = None
+    for cmd in ([exe], ["sudo", "-n", exe]):
+        try:
+            out = subprocess.run(cmd + ["-j", "-i", "-H", "-A", dev], capture_output=True, text=True,
+                                 timeout=10, stdin=subprocess.DEVNULL).stdout
+            d = json.loads(out)
+        except (OSError, subprocess.SubprocessError, ValueError):
+            continue
+        if isinstance(d.get("nvme_smart_health_information_log"), dict):
+            log, status = d["nvme_smart_health_information_log"], d.get("smart_status", {})
+            model, fw = d.get("model_name"), d.get("firmware_version")
+            break
+    if log is None:
+        return {"error": "smart.denied"}
+    unit = 512_000   # 1 data unit NVMe = 1000 x 512 byte
+    return {"passed": status.get("passed", True), "crit": log.get("critical_warning", 0),
+            "spare": log.get("available_spare"), "spare_thr": log.get("available_spare_threshold"),
+            "used": log.get("percentage_used"), "read": log.get("data_units_read", 0) * unit,
+            "written": log.get("data_units_written", 0) * unit, "hours": log.get("power_on_hours"),
+            "cycles": log.get("power_cycles"), "unsafe": log.get("unsafe_shutdowns"),
+            "media": log.get("media_errors", 0), "model": model, "fw": fw}
+
+
+class SmartPoller(threading.Thread):
+    """SMART berubah pelan dan smartctl lambat: cek tiap 5 menit (1 menit selama masih gagal)."""
+
+    def __init__(self):
+        super().__init__(daemon=True)
+        self.data = None
+
+    def run(self):
+        while True:
+            self.data = read_smart()
+            time.sleep(60 if "error" in self.data else 300)
+
+
+def read_battery():
+    """Kondisi baterai dari sysfs: kapasitas, kesehatan (full / design), siklus, daya."""
+    for base in sorted(glob.glob("/sys/class/power_supply/BAT*")):
+        def num(name):
+            v = read_sysfs(f"{base}/{name}")
+            return int(v) if v.lstrip("-").isdigit() else None
+        energy = num("energy_full_design") is not None
+        full, design = (num("energy_full"), num("energy_full_design")) if energy else (num("charge_full"), num("charge_full_design"))
+        volt = num("voltage_min_design") or num("voltage_now")
+        to_wh = (lambda v: v / 1e6) if energy else (lambda v: v * volt / 1e12 if volt else None)
+        watts = None
+        if energy and num("power_now"):
+            watts = num("power_now") / 1e6
+        elif num("current_now") and num("voltage_now"):
+            watts = num("current_now") * num("voltage_now") / 1e12
+        return {"name": os.path.basename(base), "capacity": num("capacity"), "status": read_sysfs(f"{base}/status"),
+                "health": full / design * 100 if full and design else None,
+                "full_wh": to_wh(full) if full else None, "design_wh": to_wh(design) if design else None,
+                "cycles": num("cycle_count"), "model": read_sysfs(f"{base}/model_name"),
+                "tech": read_sysfs(f"{base}/technology"), "watts": abs(watts) if watts else None}
+    return None
+
+
+def read_install_time():
+    """Waktu Linux dipasang: pembuatan folder log installer, atau pembuatan filesystem root (birth time)."""
+    for path in ("/var/log/installer", "/", "/lost+found", "/etc/machine-id"):
+        try:
+            out = subprocess.run(["stat", "-c", "%W", path], capture_output=True, text=True, timeout=2).stdout.strip()
+        except (OSError, subprocess.SubprocessError):
+            continue
+        if out.isdigit() and int(out) > 0:
+            return datetime.fromtimestamp(int(out))
+    return None
+
+
+def fmt_age(then, now=None):
+    now = now or datetime.now()
+    y, m, d = now.year - then.year, now.month - then.month, now.day - then.day
+    if d < 0:
+        m -= 1
+        d += monthrange(now.year if now.month > 1 else now.year - 1, now.month - 1 or 12)[1]
+    if m < 0:
+        y, m = y - 1, m + 12
+    if y:
+        return " ".join([tr("age.y", n=y)] + ([tr("age.m", n=m)] if m else []))
+    if m:
+        return " ".join([tr("age.m", n=m)] + ([tr("age.d", n=d)] if d else []))
+    if d:
+        return tr("age.d", n=d)
+    return tr("age.h", n=int((now - then).total_seconds() // 3600))
+
+
+def read_os_name():
+    m = re.search(r'^PRETTY_NAME="?([^"\n]+)', read_sysfs("/etc/os-release"), re.M)
+    return m.group(1) if m else "Linux"
+
+
+def fmt_tb(n):
+    return f"{n / 1e12:.1f} TB" if n >= 1e12 else f"{n / 1e9:.0f} GB"
 
 
 BOLT = ((38, 4), (14, 36), (28, 36), (22, 60), (50, 24), (35, 24), (44, 4))
@@ -551,7 +767,8 @@ class Widget(QWidget):
         if self.opacity_bg == 0:            # migrasi: dulu "Transparan" = opacity 0
             self.opacity_bg, self.show_bg = 140, False
         self.locked = self.cfg.get("locked", False)
-        self.svc = {n: {"show": True, "port": port} for n, _, _, port in SERVICES}
+        self.on_top = bool(self.cfg.get("on_top", False))
+        self.svc = {n: {"show": True, **({"port": port} if port else {})} for n, _, _, port in SERVICES}
         self.svc["Docker"] = {"show": True}
         for k, v in (self.cfg.get("services") or {}).items():
             if k in self.svc and isinstance(v, dict):
@@ -563,7 +780,7 @@ class Widget(QWidget):
         FX = self.cfg.get("fx", True)
         global LANG
         LANG = self.cfg.get("lang") if self.cfg.get("lang") in LANGS else detect_lang()
-        self.theme = self.cfg.get("theme", "Default")
+        self.theme = THEME_ALIAS.get(self.cfg.get("theme"), self.cfg.get("theme", "Default"))
         if self.theme not in THEMES:
             self.theme = "Default"
         global FONT_FAMILY
@@ -584,6 +801,11 @@ class Widget(QWidget):
         self.sensors = []   # (label, value_str, color)
         self.swaps = read_swaps()
         self.nvme = read_nvme_info()
+        self.battery = read_battery()
+        self.install_time = read_install_time()
+        self.os_name = read_os_name()
+        self.smart = SmartPoller()
+        self.smart.start()
         self.nvme_parts = []
         self.nvme_io = None          # (read B/s, write B/s, busy %)
         self._io_prev = None
@@ -598,12 +820,7 @@ class Widget(QWidget):
         self.poller.start()
         self.drag = None
 
-        self.setWindowFlags(
-            Qt.FramelessWindowHint
-            | Qt.Tool                       # tidak muncul di taskbar
-            | Qt.WindowStaysOnBottomHint    # di bawah window lain, di atas wallpaper
-            | Qt.WindowDoesNotAcceptFocus
-        )
+        self.setWindowFlags(self.window_flags())
         self.setAttribute(Qt.WA_TranslucentBackground)
         self.setAttribute(Qt.WA_X11NetWmWindowTypeDesktop, False)
         self.setWindowTitle(APP_NAME)
@@ -618,6 +835,15 @@ class Widget(QWidget):
         self.timer.timeout.connect(self.tick)
         self.timer.start(self.interval * 1000)
         self.setup_tray()
+
+    def window_flags(self):
+        return (
+            Qt.FramelessWindowHint
+            | Qt.Tool                       # tidak muncul di taskbar
+            | (Qt.WindowStaysOnTopHint if self.on_top        # di depan semua window
+               else Qt.WindowStaysOnBottomHint)              # di bawah window lain, di atas wallpaper
+            | Qt.WindowDoesNotAcceptFocus
+        )
 
     # ---------- tray ----------
     def setup_tray(self):
@@ -643,6 +869,9 @@ class Widget(QWidget):
         lock = QAction(tr("menu.lock"), m, checkable=True, checked=self.locked)
         lock.toggled.connect(self.set_locked)
         m.addAction(lock)
+        top = QAction(tr("menu.top"), m, checkable=True, checked=self.on_top)
+        top.toggled.connect(self.set_on_top)
+        m.addAction(top)
         bg = QAction(tr("menu.bg"), m, checkable=True, checked=self.show_bg)
         bg.toggled.connect(self.set_show_bg)
         m.addAction(bg)
@@ -656,8 +885,9 @@ class Widget(QWidget):
             show = QAction(tr("menu.show"), sub, checkable=True, checked=self.svc[name]["show"])
             show.toggled.connect(lambda v, n=name: self.set_service_show(n, v))
             sub.addAction(show)
-            sub.addAction(tr("menu.port", port=self.svc[name]["port"])).triggered.connect(
-                lambda _, n=name: self.ask_port(n))
+            if "port" in self.svc[name]:
+                sub.addAction(tr("menu.port", port=self.svc[name]["port"])).triggered.connect(
+                    lambda _, n=name: self.ask_port(n))
         dk = QAction(tr("menu.docker"), sv, checkable=True, checked=self.svc["Docker"]["show"])
         dk.toggled.connect(lambda v: self.set_service_show("Docker", v))
         sv.addAction(dk)
@@ -712,6 +942,7 @@ class Widget(QWidget):
         self.sensors = self.read_sensors()
         self.swaps = read_swaps()
         self.nvme = read_nvme_info()
+        self.battery = read_battery()
         self.read_nvme_usage()
         self.read_net()
         avg = sum(self.cpu_now) / len(self.cpu_now)
@@ -781,14 +1012,6 @@ class Widget(QWidget):
                     rows.append((f"{chip}/{e.label or 'fan'}", f"{e.current} RPM", ACCENT))
         except Exception:
             pass
-        try:
-            b = psutil.sensors_battery()
-            if b:
-                state = tr("bat.charging") if b.power_plugged else tr("bat.discharging")
-                col = CRIT if b.percent < 15 else WARN if b.percent < 35 else OK
-                rows.append((tr("battery"), f"{b.percent:.0f}% {state}", col))
-        except Exception:
-            pass
         return rows
 
     # ---------- painting ----------
@@ -801,17 +1024,17 @@ class Widget(QWidget):
             a = self.opacity_bg
             if FX:
                 grad = QLinearGradient(0, 0, 0, self.height())
-                grad.setColorAt(0, QColor(30, 40, 56, a))
-                grad.setColorAt(1, QColor(8, 12, 20, a))
+                grad.setColorAt(0, alpha(BG_TOP, a))
+                grad.setColorAt(1, alpha(BG_BOTTOM, a))
                 p.fillPath(bg, QBrush(grad))
                 edge = QLinearGradient(0, 0, 0, self.height())
-                edge.setColorAt(0, QColor(255, 255, 255, 70))
-                edge.setColorAt(1, QColor(255, 255, 255, 12))
+                edge.setColorAt(0, alpha(TRACK, 70))
+                edge.setColorAt(1, alpha(TRACK, 12))
                 p.setPen(QPen(QBrush(edge), 1))
                 p.setBrush(Qt.NoBrush)
                 p.drawRoundedRect(QRectF(0.5, 0.5, self.width() - 1, self.height() - 1), 14, 14)
             else:
-                p.fillPath(bg, QColor(15, 20, 28, a))
+                p.fillPath(bg, alpha(BG_BOTTOM, a))
             self.paint_content(p)
             return
 
@@ -839,6 +1062,7 @@ class Widget(QWidget):
         lx, colw = 16, COLW
         rx = lx + COLW + 24
         cx = rx + COLW + 24
+        dx = cx + COLW + 24
 
         p.setFont(font(12, QFont.Bold))
         if FX:
@@ -869,14 +1093,25 @@ class Widget(QWidget):
         y = self.section(p, tr("sec.services"), "", rx, y, colw)
         y = self.services_block(p, rx, y, colw)
         y += 6
-        y = self.section(p, "NVME", f"/dev/{NVME_DEV}", rx, y, colw)
-        y = self.nvme_block(p, rx, y, colw)
-        y += 6
         y = self.section(p, tr("sec.sensors"), "", rx, y, colw)
         self.sensor_block(p, rx, y, colw)
 
+        y = 40
+        y = self.section(p, "NVME", f"/dev/{NVME_DEV}", cx, y, colw)
+        y = self.nvme_block(p, cx, y, colw)
+        y += 6
+        y = self.section(p, tr("sec.smart"), "", cx, y, colw)
+        y = self.smart_block(p, cx, y, colw)
+        if self.battery:
+            y += 6
+            y = self.section(p, tr("sec.battery"), self.battery["name"], cx, y, colw)
+            y = self.battery_block(p, cx, y, colw)
+        y += 6
+        y = self.section(p, tr("sec.system"), "", cx, y, colw)
+        self.system_block(p, cx, y, colw)
+
         if self.svc["Docker"]["show"]:
-            self.docker_column(p, cx, colw)
+            self.docker_column(p, dx, colw)
 
         self.legend(p, 16, self.height() - 26, self.width() - 32)
 
@@ -898,14 +1133,14 @@ class Widget(QWidget):
             ln.setColorAt(1, alpha(ACCENT, 0))
             p.setPen(QPen(QBrush(ln), 1.2))
         else:
-            p.setPen(QPen(QColor(255, 255, 255, 30), 1))
+            p.setPen(QPen(alpha(TRACK, 30), 1))
         p.drawLine(x, y + 21, x + w, y + 21)
         return y + 28
 
     def graph(self, p, rect, data, color):
         p.save()
         p.setPen(Qt.NoPen)
-        p.setBrush(QColor(255, 255, 255, 14))
+        p.setBrush(alpha(TRACK, 14))
         p.drawRoundedRect(rect, 4, 4)
         pts = list(data)
         n = len(pts)
@@ -953,7 +1188,7 @@ class Widget(QWidget):
     def bar(self, p, rect, pct, color):
         p.save()
         p.setPen(Qt.NoPen)
-        p.setBrush(QColor(255, 255, 255, 22))
+        p.setBrush(alpha(TRACK, 22))
         p.drawRoundedRect(rect, 4, 4)
         fill = QRectF(rect.x(), rect.y(), rect.width() * min(pct, 100) / 100, rect.height())
         if FX and fill.width() > 1:
@@ -1105,9 +1340,16 @@ class Widget(QWidget):
         if len(imgs) > DOCKER_MAX_ROWS:
             self.docker_message(p, x, y, w, tr("more", n=len(imgs) - DOCKER_MAX_ROWS))
 
+    def service_detail(self, info):
+        if "policy" in info:
+            text = tr("ufw.policy", i=info["policy"][0], o=info["policy"][1])
+            return text + (tr("ufw.rules", n=info["rules"]) if info["rules"] is not None else "")
+        return f"{info['version']} · {info['procs']} proc · {fmt_bytes(info['rss'])} · {info['ms']:.0f} ms"
+
     def services_block(self, p, x, y, w):
         p.setFont(font(9))
-        names = [n for n, _, _, _ in SERVICES if self.svc[n]["show"]]
+        names = [n for n, _, _, _ in SERVICES if self.svc[n]["show"]
+                 and not (self.poller.data.get(n) or {}).get("absent")]
         if not names:
             return self.docker_message(p, x, y, w, tr("svc.none"))
         for name in names:
@@ -1115,11 +1357,11 @@ class Widget(QWidget):
             if info is None:
                 col, status, detail = MUTED, tr("checking"), ""
             elif not info["up"]:
-                col, status, detail = CRIT, tr("svc.down"), tr("svc.noresp")
+                col, status = CRIT, tr(info.get("down_key", "svc.down"))
+                detail = self.service_detail(info) if "policy" in info else tr("svc.noresp")
             else:
                 col = WARN if info["ms"] >= 200 else OK
-                status = tr("svc.running")
-                detail = f"{info['version']} · {info['procs']} proc · {fmt_bytes(info['rss'])} · {info['ms']:.0f} ms"
+                status, detail = tr(info.get("up_key", "svc.running")), self.service_detail(info)
             self.dot_row(p, x, y, w, col, name, status, 90)
             p.setPen(MUTED)
             p.setFont(font(8))
@@ -1135,9 +1377,13 @@ class Widget(QWidget):
         state_col = OK if n["state"] == "live" else CRIT
         self.dot_row(p, x, y, w, state_col, "Status", n["state"], 150)
         y += 19
+        sm = self.smart.data or {}
+        model = sm.get("model") or n["model"]
+        fw = sm.get("fw") or n["fw"]
+        self.dot_row(p, x, y, w, ACCENT, tr("nvme.model"), model, w - 70)
+        y += 19
         p.setPen(MUTED)
-        p.drawText(QRectF(x + 14, y, w - 14, 16), Qt.AlignLeft | Qt.AlignVCenter,
-                   p.fontMetrics().elidedText(f"{n['model']} · fw {n['fw']}", Qt.ElideRight, int(w - 14)))
+        p.drawText(QRectF(x + 14, y, w - 14, 16), Qt.AlignLeft | Qt.AlignVCenter, f"firmware {fw}" if fw else "")
         y += 19
         if n["temp"] is not None:
             self.dot_row(p, x, y, w, temp_color(n["temp"], n["high"]), tr("nvme.temp"), f"{n['temp']:.0f}°C", 110)
@@ -1151,6 +1397,80 @@ class Widget(QWidget):
         for mount, u in self.nvme_parts:
             y = self.usage_row(p, x, y, w, mount, u.percent, f"{fmt_bytes(u.used)} / {fmt_bytes(u.total)}")
         return y
+
+    def smart_block(self, p, x, y, w):
+        p.setFont(font(9))
+        sm = self.smart.data
+        if sm is None:
+            return self.docker_message(p, x, y, w, tr("checking"))
+        if "error" in sm:
+            y = self.docker_message(p, x, y, w, tr(sm["error"]), CRIT if sm["error"] != "smart.missing" else WARN)
+            hint = sm["error"] + ".hint"
+            return self.docker_message(p, x, y, w, tr(hint)) if hint in I18N else y
+        bad = not sm["passed"] or sm["crit"]
+        spare, thr = sm["spare"], sm["spare_thr"] or 0
+        used = sm["used"] or 0
+        health_col = CRIT if bad else WARN if (spare is not None and spare <= max(thr, 50)) or used >= 80 else OK
+        self.dot_row(p, x, y, w, health_col, tr("smart.health"),
+                     ("PASSED" if sm["passed"] else "FAILED") + (f" · 0x{sm['crit']:02x}" if sm["crit"] else ""), 130)
+        y += 19
+        if spare is not None:
+            self.dot_row(p, x, y, w, CRIT if spare <= thr else WARN if spare <= 50 else OK, tr("smart.spare"),
+                         f"{spare}% (min {thr}%)", 130)
+            y += 19
+        y = self.usage_row(p, x, y, w, tr("smart.wear"), used, f"{used}%")
+        self.dot_row(p, x, y, w, ACCENT, tr("smart.rw"), f"{fmt_tb(sm['written'])} / {fmt_tb(sm['read'])}", 150)
+        y += 19
+        if sm["hours"] is not None:
+            self.dot_row(p, x, y, w, ACCENT, tr("smart.poh"),
+                         tr("smart.poh.val", h=f"{sm['hours']:,}", d=sm["hours"] // 24), 150)
+            y += 19
+        if sm["cycles"] is not None:
+            self.dot_row(p, x, y, w, ACCENT, tr("smart.cyc"), f"{sm['cycles']:,} · {sm['unsafe'] or 0:,}", 110)
+            y += 19
+        if sm["media"]:
+            self.dot_row(p, x, y, w, CRIT, tr("smart.media"), str(sm["media"]), 110)
+            y += 19
+        return y
+
+    def battery_block(self, p, x, y, w):
+        b = self.battery
+        p.setFont(font(9))
+        cap = b["capacity"]
+        if cap is not None:
+            state = {"Charging": tr("bat.charging"), "Discharging": tr("bat.discharging"), "Full": tr("bat.full")}.get(
+                b["status"], b["status"].lower())
+            self.dot_row(p, x, y, w, CRIT if cap < 15 else WARN if cap < 35 else OK, tr("bat.cap"), f"{cap}% · {state}", 170)
+            y += 19
+        if b["health"] is not None:
+            wh = f" ({b['full_wh']:.1f}/{b['design_wh']:.1f} Wh)" if b["full_wh"] and b["design_wh"] else ""
+            h = b["health"]
+            self.dot_row(p, x, y, w, CRIT if h < 60 else WARN if h < 80 else OK, tr("bat.health"), f"{h:.0f}%{wh}", 190)
+            y += 19
+        if b["cycles"] is not None:
+            self.dot_row(p, x, y, w, ACCENT, tr("bat.cycles"), f"{b['cycles']:,}", 110)
+            y += 19
+        if b["watts"]:
+            self.dot_row(p, x, y, w, ACCENT, tr("bat.power"), f"{b['watts']:.1f} W", 110)
+            y += 19
+        detail = " · ".join(v for v in (b["model"], b["tech"]) if v)
+        if detail:
+            p.setPen(MUTED)
+            p.drawText(QRectF(x + 14, y, w - 14, 16), Qt.AlignLeft | Qt.AlignVCenter,
+                       p.fontMetrics().elidedText(detail, Qt.ElideRight, int(w - 14)))
+            y += 19
+        return y
+
+    def system_block(self, p, x, y, w):
+        p.setFont(font(9))
+        t = self.install_time
+        self.dot_row(p, x, y, w, ACCENT, tr("sys.age"), fmt_age(t) if t else tr("sys.unknown"), 150)
+        y += 19
+        p.setPen(MUTED)
+        detail = " · ".join(v for v in (tr("sys.since", date=t.strftime("%Y-%m-%d")) if t else "", self.os_name) if v)
+        p.drawText(QRectF(x + 14, y, w - 14, 16), Qt.AlignLeft | Qt.AlignVCenter,
+                   p.fontMetrics().elidedText(detail, Qt.ElideRight, int(w - 14)))
+        return y + 19
 
     def sensor_block(self, p, x, y, w):
         p.setFont(font(9))
@@ -1173,7 +1493,7 @@ class Widget(QWidget):
             y += 19
 
     def legend(self, p, x, y, w):
-        p.setPen(QPen(QColor(255, 255, 255, 30), 1))
+        p.setPen(QPen(alpha(TRACK, 30), 1))
         p.drawLine(x, y, x + w, y)
         p.setFont(font(8))
         items = ((OK, tr("legend.ok")), (WARN, tr("legend.warn")), (CRIT, tr("legend.crit")))
@@ -1199,7 +1519,7 @@ class Widget(QWidget):
             self.persist()
 
     def persist(self):
-        self.cfg.update(x=self.x(), y=self.y(), opacity=self.opacity_bg, show_bg=self.show_bg, fx=FX, lang=LANG, services=self.svc, theme=self.theme, font=self.font_name, locked=self.locked,
+        self.cfg.update(x=self.x(), y=self.y(), opacity=self.opacity_bg, show_bg=self.show_bg, fx=FX, lang=LANG, services=self.svc, theme=self.theme, font=self.font_name, locked=self.locked, on_top=self.on_top,
                         interval=self.interval)
         save_config(self.cfg)
         if hasattr(self, "tray"):   # sinkronkan centang menu tray
@@ -1244,6 +1564,14 @@ class Widget(QWidget):
         self.locked = v
         self.persist()
 
+    def set_on_top(self, v):
+        self.on_top = v
+        visible = self.isVisible()
+        self.setWindowFlags(self.window_flags())   # mengganti flag menyembunyikan window
+        if visible:
+            self.show()
+        self.persist()
+
     def set_fx(self, v):
         global FX
         FX = v
@@ -1268,6 +1596,7 @@ class Widget(QWidget):
     def set_theme(self, name):
         self.theme = name
         apply_theme(name)
+        self.sensors = self.read_sensors()   # warna status ikut tema
         self.persist()
         self.update()
 

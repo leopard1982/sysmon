@@ -80,6 +80,11 @@ def demo_data(w):
 def inject_poller(w):
     d = dict(w.poller.data)
     d["WiFi"] = {"ssid": "Home-WiFi", "signal": 78}
+    w.smart.data = {   # DEMO: nilai contoh SMART NVMe
+        "passed": True, "crit": 0, "spare": 100, "spare_thr": 1, "used": 2, "read": 9_300_000_000_000,
+        "written": 16_600_000_000_000, "hours": 7516, "cycles": 298, "unsafe": 101, "media": 0,
+        "model": "Samsung SSD 980 PRO 500GB", "fw": "5B2QGXA7",
+    }
     if "Docker" in d and "error" not in d["Docker"]:
         d["Docker"] = {
             "version": d["Docker"]["version"],
@@ -132,6 +137,11 @@ def main():
     w.set_font("Monospace")
     inject_poller(w)
     compose(w, os.path.join(OUT, "theme-matrix.png"))
+
+    w.set_theme("Terang")
+    w.set_font("Sans")
+    inject_poller(w)
+    compose(w, os.path.join(OUT, "theme-light.png"))
 
     h.make_icon(256).pixmap(256, 256).save(os.path.join(ROOT, "docs", "logo.png"))
 

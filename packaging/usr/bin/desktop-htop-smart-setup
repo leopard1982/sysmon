@@ -1,0 +1,28 @@
+#!/bin/sh
+# Izinkan user memanggil `smartctl` (hanya perintah baca SMART NVMe) tanpa password, supaya
+# widget bisa menampilkan SMART. Opt-in; hapus lagi dengan: sudo desktop-htop-smart-setup --remove
+set -eu
+
+FILE=/etc/sudoers.d/desktop-htop-smart
+
+[ "$(id -u)" -eq 0 ] || { echo "Jalankan dengan: sudo desktop-htop-smart-setup" >&2; exit 1; }
+
+if [ "${1:-}" = "--remove" ]; then
+    rm -f "$FILE"
+    echo "Izin dihapus: $FILE"
+    exit 0
+fi
+
+USER_NAME="${SUDO_USER:-}"
+[ -n "$USER_NAME" ] && [ "$USER_NAME" != root ] || { echo "Jalankan lewat sudo dari akun biasa (bukan root langsung)." >&2; exit 1; }
+
+SMARTCTL=/usr/sbin/smartctl
+[ -x "$SMARTCTL" ] || { echo "smartctl belum terpasang: sudo apt install smartmontools" >&2; exit 1; }
+
+TMP="$(mktemp)"
+trap 'rm -f "$TMP"' EXIT
+printf '%s ALL=(root) NOPASSWD: %s -j -i -H -A /dev/nvme0\n' "$USER_NAME" "$SMARTCTL" > "$TMP"
+visudo -cf "$TMP" >/dev/null
+install -m 0440 -o root -g root "$TMP" "$FILE"
+echo "OK: $USER_NAME boleh menjalankan '$SMARTCTL -j -i -H -A /dev/nvme0' tanpa password."
+echo "Widget akan menampilkan SMART dalam maksimal 1 menit."

@@ -4,11 +4,12 @@ Section: utils
 Priority: optional
 Architecture: all
 Depends: python3, python3-psutil, python3-pyqt5
-Recommends: lm-sensors, network-manager
+Recommends: lm-sensors, network-manager, smartmontools
 Maintainer: Suryo Adhy Chandra <noreply@users.noreply.github.com>
 Description: System Monitoring - widget monitor sistem di desktop
  Widget transparan di atas wallpaper yang menampilkan CPU per core, RAM,
- swap, jaringan (internet, WiFi, kecepatan up/down), NVMe, sensor suhu,
+ swap, jaringan (internet, WiFi, kecepatan up/down), NVMe (termasuk SMART),
+ sensor suhu, baterai (kesehatan), usia instalasi Linux, Nginx, Apache, UFW,
  PostgreSQL, MariaDB, MongoDB, Redis, serta container dan image Docker.
  Punya ikon di system tray, tema tulisan, dan bisa dijalankan otomatis
  saat login.

@@ -4,7 +4,7 @@
 
 # System Monitoring
 
-**A system monitoring widget for the Linux desktop** — per-core CPU, RAM, network, NVMe, sensors, databases and Docker, drawn right on top of your wallpaper.
+**A system monitoring widget for the Linux desktop** — per-core CPU, RAM, network, NVMe + SMART, battery health, install age, sensors, databases, web servers, firewall and Docker, drawn right on top of your wallpaper.
 
 [![License: GPL v3](https://img.shields.io/badge/license-GPLv3-blue.svg)](LICENSE)
 ![Python](https://img.shields.io/badge/python-3-blue)
@@ -26,11 +26,15 @@
 | 🧠 **CPU** | Per-core usage with history graphs, average and frequency |
 | 💾 **Memory & Swap** | RAM, available memory, and every swap (swap file, zram) listed separately |
 | 🌐 **Network** | Internet status + latency, WiFi SSID & signal, download/upload speed |
-| ⚡ **NVMe** | Controller state, model & firmware, temperature, read/write I/O, per-partition capacity |
-| 🌡️ **Sensors** | All temperature sensors, fans and battery |
+| ⚡ **NVMe** | Controller state, **SSD model** & firmware, temperature, read/write I/O, per-partition capacity |
+| 🩺 **NVMe SMART** | Health, spare, wear, data written/read, power-on hours, power cycles, unsafe shutdowns |
+| 🔋 **Battery** | Charge, **health** (full vs design), cycles, power draw, model |
+| 🕰️ **Install age** | How long Linux has been installed on this computer |
+| 🌡️ **Sensors** | All temperature sensors and fans |
+| 🌐 **Web & firewall** | **Nginx**, **Apache**, **UFW** — status, version, processes, memory |
 | 🗄️ **Databases** | **PostgreSQL**, **MariaDB**, **MongoDB**, **Redis** — status, version, processes, memory, latency |
 | 🐳 **Docker** | Containers (state/health) and images (size, in use or not) |
-| 🎨 **Look** | Hide the background, 6 text themes, 3 fonts, glow effects |
+| 🎨 **Look** | 8 themes (matching background + text colors), hide the background, always on top, 3 fonts, glow effects |
 | 🚦 **Color indicators** | 🟢 good · 🟡 caution · 🔴 high |
 | 🌍 **Two languages** | Indonesian and English, switch from the menu |
 | 🔔 **System tray** | Tray icon, start at login (toggle on/off) |
@@ -72,7 +76,7 @@ kbuildsycoca6 --noincremental   # KDE Plasma 6; or log out and back in
 ### Option 2 — run from source
 
 ```bash
-sudo apt install python3-psutil python3-pyqt5 lm-sensors network-manager
+sudo apt install python3-psutil python3-pyqt5 lm-sensors network-manager smartmontools
 git clone https://github.com/<username>/<repo>.git
 cd <repo>
 python3 htop_widget.py
@@ -94,17 +98,18 @@ make lint         # lintian + .desktop validation
 | Menu | What it does |
 |---|---|
 | Lock position | Prevent accidental dragging |
+| Show on top | Keep the widget in front of other windows (default: below them, above the wallpaper) |
 | Show background | Turn off to draw text straight onto the wallpaper |
 | Background opacity | Light / Medium / Solid |
 | Monitored services | Per service: show/hide and **change port**; Docker: show/hide |
 | Visual effects (glow) | Gradients, glow, fade-in |
-| Text theme | Default, White, Dark, Green (Matrix), Amber, Purple |
+| Theme | Default, Black, Blue, Green (Matrix), Amber, Purple, Red, Light — background and text colors change together |
 | Font | Sans, Monospace, Serif |
 | Language / Bahasa | Bahasa Indonesia, English |
 | Update interval | 1 second, 5 seconds, 30 seconds, 1 minute |
 | Start automatically at login | On/off |
 
-> 💡 The **Dark** theme is meant for light wallpapers with the background turned off.
+> 💡 The **Light** theme (dark text) suits light wallpapers; turn the background off to draw text straight onto the wallpaper.
 
 ## ⚙️ Configuration
 
@@ -121,6 +126,9 @@ All choices are stored in `~/.config/desktop_htop.json`:
     "MariaDB":    {"show": true, "port": 3306},
     "MongoDB":    {"show": true, "port": 27017},
     "Redis":      {"show": true, "port": 6379},
+    "Nginx":      {"show": true, "port": 80},
+    "Apache":     {"show": true, "port": 80},
+    "UFW":        {"show": true},
     "Docker":     {"show": true}
   }
 }
@@ -135,6 +143,11 @@ The autostart choice lives in `~/.config/autostart/desktop-htop.desktop` and ove
 | CPU, RAM, network, sensors, battery | [`psutil`](https://github.com/giampaolo/psutil) |
 | Swap | `/proc/swaps` |
 | NVMe | `/sys/class/nvme/…` + `psutil` |
+| NVMe SMART | `smartctl -j` (checked every 5 minutes) |
+| Battery | `/sys/class/power_supply/BAT*` (health = `energy_full` / `energy_full_design`) |
+| Install age | creation time of `/var/log/installer`, or the root filesystem (`stat %W`) |
+| Nginx / Apache | `HEAD /` to the local port + process check |
+| UFW | `/etc/ufw/ufw.conf` and `/etc/default/ufw` (no root; rule count only if readable) |
 | WiFi (SSID, signal) | `nmcli` |
 | Internet | TCP connect to `1.1.1.1:53` / `8.8.8.8:53` |
 | PostgreSQL | `SSLRequest` on port 5432 |
@@ -148,7 +161,8 @@ Service checks run in a background thread and only for services that are shown, 
 ## ⚠️ Limitations
 
 - Tested on **Debian 13 + KDE Plasma (X11)**. On Wayland, "below all windows" placement may behave differently.
-- NVMe **SMART** health (wear level, remaining life) is not shown because it needs root.
+- NVMe **SMART** needs root. Once `smartmontools` is installed, run `sudo desktop-htop-smart-setup` once (adds a narrow sudoers rule for one read-only command; revoke with `--remove`). `/dev/nvme0` only.
+- Install age is an estimate from the filesystem / installer log creation time.
 - Docker: no per-container CPU/memory yet.
 - Database process count and memory are matched by local process name; a database inside a Docker container only shows its port status.
 
@@ -158,13 +172,14 @@ Service checks run in a background thread and only for services that are shown, 
 |---|---|
 | Widget is not visible | It sits below all windows. Show the desktop or click the tray icon |
 | No tray icon | Make sure *System Tray* is enabled in your panel |
+| SMART: "smartctl is not installed" | `sudo apt install smartmontools` |
+| SMART: "root access needed" | `sudo desktop-htop-smart-setup` |
 | Docker: "permission denied" | `sudo usermod -aG docker $USER`, then log in again |
 | Stale launcher icon | `kbuildsycoca6 --noincremental` or log in again |
 | Won't autostart | Check **Start automatically at login** in the menu |
 
 ## 🗺️ Roadmap
 
-- [ ] NVMe SMART health (via a privileged helper)
 - [ ] Per-container Docker CPU/memory
 - [ ] GPU support (NVIDIA/AMD)
 - [ ] Notifications when a value crosses a threshold

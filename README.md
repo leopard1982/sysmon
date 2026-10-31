@@ -4,7 +4,7 @@
 
 # System Monitoring
 
-**Widget monitor sistem untuk desktop Linux** — CPU per core, RAM, jaringan, NVMe, sensor, database, dan Docker, langsung di atas wallpaper kamu.
+**Widget monitor sistem untuk desktop Linux** — CPU per core, RAM, jaringan, NVMe + SMART, kesehatan baterai, usia instalasi, sensor, database, web server, firewall, dan Docker, langsung di atas wallpaper kamu.
 
 [![License: GPL v3](https://img.shields.io/badge/license-GPLv3-blue.svg)](LICENSE)
 ![Python](https://img.shields.io/badge/python-3-blue)
@@ -26,11 +26,15 @@
 | 🧠 **CPU** | Penggunaan tiap core dengan grafik riwayat, rata-rata, dan frekuensi |
 | 💾 **Memori & Swap** | RAM, memori tersedia, dan semua swap (swap file, zram) terpisah |
 | 🌐 **Jaringan** | Status internet + latensi, SSID & sinyal WiFi, kecepatan download/upload |
-| ⚡ **NVMe** | Status controller, model & firmware, suhu, I/O baca/tulis, kapasitas tiap partisi |
-| 🌡️ **Sensor** | Semua sensor suhu, kipas, dan baterai |
+| ⚡ **NVMe** | Status controller, **model SSD** & firmware, suhu, I/O baca/tulis, kapasitas tiap partisi |
+| 🩺 **SMART NVMe** | Kesehatan, cadangan, keausan, data ditulis/dibaca, jam nyala, siklus daya, shutdown tak aman |
+| 🔋 **Baterai** | Kapasitas, **kesehatan** (penuh vs desain), siklus, daya, model |
+| 🕰️ **Usia instalasi** | Sudah berapa lama Linux terpasang di komputer |
+| 🌡️ **Sensor** | Semua sensor suhu dan kipas |
+| 🌐 **Web & firewall** | **Nginx**, **Apache**, **UFW** — status, versi, proses, memori |
 | 🗄️ **Database** | **PostgreSQL**, **MariaDB**, **MongoDB**, **Redis** — status, versi, proses, memori, latensi |
 | 🐳 **Docker** | Daftar container (status/health) dan image (ukuran, sedang dipakai atau tidak) |
-| 🎨 **Tampilan** | Hilangkan background, 6 tema tulisan, 3 font, efek glow |
+| 🎨 **Tampilan** | 8 tema (background + warna teks serasi), hilangkan background, selalu di atas, 3 font, efek glow |
 | 🚦 **Indikator warna** | 🟢 bagus · 🟡 hati-hati · 🔴 tinggi |
 | 🌍 **Dua bahasa** | Indonesia dan English, ganti dari menu |
 | 🔔 **System tray** | Ikon di tray, autostart saat login (bisa diatur on/off) |
@@ -76,7 +80,7 @@ kbuildsycoca6 --noincremental   # KDE Plasma 6; atau login ulang
 ### Opsi 2 — jalankan dari source
 
 ```bash
-sudo apt install python3-psutil python3-pyqt5 lm-sensors network-manager
+sudo apt install python3-psutil python3-pyqt5 lm-sensors network-manager smartmontools
 git clone https://github.com/<username>/<repo>.git
 cd <repo>
 python3 htop_widget.py
@@ -98,17 +102,18 @@ make lint         # lintian + validasi .desktop
 | Menu | Fungsi |
 |---|---|
 | Kunci posisi | Cegah widget tergeser tidak sengaja |
+| Tampilkan di atas | Widget selalu di depan window lain (bawaan: di bawah, di atas wallpaper) |
 | Tampilkan background | Matikan untuk teks langsung di atas wallpaper |
 | Transparansi background | Tipis / Sedang / Pekat |
 | Layanan monitoring | Per layanan: tampilkan/sembunyikan dan **ubah port**; Docker: tampilkan/sembunyikan |
 | Efek visual (glow) | Gradasi, glow, fade-in |
-| Tema tulisan | Default, Putih, Gelap, Hijau (Matrix), Amber, Ungu |
+| Tema | Default, Hitam, Biru, Hijau (Matrix), Amber, Ungu, Merah, Terang — warna background dan teks ikut berganti |
 | Jenis font | Sans, Monospace, Serif |
 | Bahasa / Language | Bahasa Indonesia, English |
 | Interval update | 1 detik, 5 detik, 30 detik, 1 menit |
 | Jalankan otomatis saat login | On/off |
 
-> 💡 Tema **Gelap** dibuat untuk wallpaper terang dengan background dimatikan.
+> 💡 Tema **Terang** (teks gelap) cocok untuk wallpaper terang; matikan background kalau ingin teks langsung di wallpaper.
 
 ## ⚙️ Konfigurasi
 
@@ -125,6 +130,9 @@ Semua pilihan disimpan di `~/.config/desktop_htop.json`:
     "MariaDB":    {"show": true, "port": 3306},
     "MongoDB":    {"show": true, "port": 27017},
     "Redis":      {"show": true, "port": 6379},
+    "Nginx":      {"show": true, "port": 80},
+    "Apache":     {"show": true, "port": 80},
+    "UFW":        {"show": true},
     "Docker":     {"show": true}
   }
 }
@@ -139,6 +147,11 @@ Autostart disimpan di `~/.config/autostart/desktop-htop.desktop` dan menimpa pen
 | CPU, RAM, jaringan, sensor, baterai | [`psutil`](https://github.com/giampaolo/psutil) |
 | Swap | `/proc/swaps` |
 | NVMe | `/sys/class/nvme/…` + `psutil` |
+| SMART NVMe | `smartctl -j` (dicek tiap 5 menit) |
+| Baterai | `/sys/class/power_supply/BAT*` (kesehatan = `energy_full` / `energy_full_design`) |
+| Usia instalasi | waktu pembuatan `/var/log/installer`, atau filesystem root (`stat %W`) |
+| Nginx / Apache | `HEAD /` ke port lokal + cek proses |
+| UFW | `/etc/ufw/ufw.conf` dan `/etc/default/ufw` (tanpa root; daftar aturan hanya jika terbaca) |
 | WiFi (SSID, sinyal) | `nmcli` |
 | Internet | koneksi TCP ke `1.1.1.1:53` / `8.8.8.8:53` |
 | PostgreSQL | `SSLRequest` ke port 5432 |
@@ -152,7 +165,8 @@ Pengecekan layanan jalan di thread terpisah dan hanya untuk layanan yang ditampi
 ## ⚠️ Batasan
 
 - Diuji di **Debian 13 + KDE Plasma (X11)**. Di Wayland, penempatan window "di bawah semua window" bisa berbeda.
-- Status kesehatan **SMART** NVMe (wear level, sisa umur) belum ada karena butuh root.
+- **SMART** NVMe butuh akses root. Setelah `smartmontools` terpasang, jalankan sekali `sudo desktop-htop-smart-setup` (menambah aturan sudoers sempit untuk satu perintah baca; cabut dengan `--remove`). Hanya `/dev/nvme0`.
+- Usia instalasi adalah perkiraan dari waktu pembuatan filesystem/log installer.
 - Docker: belum menampilkan CPU/memori per container.
 - Jumlah proses & memori database dihitung dari nama proses lokal; database di dalam container Docker hanya terlihat statusnya lewat port.
 
@@ -164,11 +178,12 @@ Pengecekan layanan jalan di thread terpisah dan hanya untuk layanan yang ditampi
 | Ikon tray tidak muncul | Pastikan *System Tray* aktif di panel |
 | Docker: "akses ditolak" | `sudo usermod -aG docker $USER`, lalu login ulang |
 | Ikon launcher lama | `kbuildsycoca6 --noincremental` atau login ulang |
+| SMART: "smartctl belum terpasang" | `sudo apt install smartmontools` |
+| SMART: "butuh izin root" | `sudo desktop-htop-smart-setup` |
 | Tidak mau autostart | Cek centang **Jalankan otomatis saat login** di menu |
 
 ## 🗺️ Rencana
 
-- [ ] Status SMART NVMe (lewat helper berhak akses)
 - [ ] CPU/memori per container Docker
 - [ ] Dukungan GPU (NVIDIA/AMD)
 - [ ] Peringatan notifikasi saat nilai melewati ambang
